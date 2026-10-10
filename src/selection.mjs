@@ -7,6 +7,13 @@
 
 import { findClip } from './timeline.mjs'
 
+let groupCounter = 0
+
+function nextGroupId() {
+  groupCounter += 1
+  return `grp_${Date.now().toString(36)}${groupCounter.toString(36)}`
+}
+
 /** Ordered unique id list. */
 export function createSelection(ids = []) {
   const seen = new Set()
@@ -81,4 +88,35 @@ export function resolveClips(timeline, ids) {
     if (found) out.push(found)
   }
   return out
+}
+
+/**
+ * Group clips (docs C9): assign one fresh groupId to every resolvable
+ * clip; clips on locked tracks are skipped, unknown ids are ignored and
+ * previous groupIds are overwritten (grouping therefore merges groups).
+ * Needs at least two targets, otherwise null.
+ */
+export function groupClips(timeline, ids) {
+  const targets = resolveClips(timeline, ids).filter(found => !found.track.locked)
+  if (targets.length < 2) return null
+  const groupId = nextGroupId()
+  for (const { clip } of targets) clip.groupId = groupId
+  return groupId
+}
+
+/**
+ * Ungroup clips (docs C9): clear groupId on the resolved ids (callers
+ * usually pass expandRelated(...) so the whole group is dissolved).
+ * Returns how many clips actually lost a group.
+ */
+export function ungroupClips(timeline, ids) {
+  const targets = resolveClips(timeline, ids).filter(found => !found.track.locked)
+  let count = 0
+  for (const { clip } of targets) {
+    if (clip.groupId) {
+      clip.groupId = null
+      count += 1
+    }
+  }
+  return count
 }

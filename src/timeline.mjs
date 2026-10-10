@@ -77,6 +77,61 @@ export function ensureTrack(timeline, trackType, name) {
   return track
 }
 
+/**
+ * Next display name for a track of the given type (Roadmap C8): counts
+ * both numbered names ("Video 1") and plain defaults ("Text") so the
+ * app's default tracks never collide with generated ones.
+ */
+export function nextTrackName(timeline, trackType) {
+  const label = { video: 'Video', text: 'Text', audio: 'Audio' }[trackType] ?? 'Track'
+  let numbered = 0
+  let total = 0
+  for (const track of timeline?.tracks ?? []) {
+    if (track.type !== trackType) continue
+    total += 1
+    const match = /\s(\d+)$/.exec(track.name ?? '')
+    if (match) numbered = Math.max(numbered, Number(match[1]))
+  }
+  return `${label} ${Math.max(numbered, total) + 1}`
+}
+
+/** Append an empty track of the given type; returns the new track (Roadmap C8). */
+export function addTrack(timeline, trackType, name) {
+  if (!timeline || !Array.isArray(timeline.tracks)) {
+    throw new Error('timeline.tracks must be an array')
+  }
+  const track = {
+    id: nextTrackId(trackType),
+    type: trackType,
+    name: name ?? nextTrackName(timeline, trackType),
+    items: []
+  }
+  timeline.tracks.push(track)
+  return track
+}
+
+/**
+ * Remove a track by id (Roadmap C8). Locked tracks are refused (the
+ * core lock-guard convention). Default removes the track WITH its
+ * clips; `{ keepClips: true }` re-homes the clips onto another track of
+ * the same type instead and returns false when there is no target left.
+ * Unknown ids return false.
+ */
+export function removeTrack(timeline, trackId, options = {}) {
+  const tracks = timeline?.tracks ?? []
+  const index = tracks.findIndex(track => track.id === trackId)
+  if (index === -1) return false
+  const track = tracks[index]
+  if (track.locked) return false
+  if (options.keepClips && (track.items ?? []).length > 0) {
+    const target = tracks.find((other, otherIndex) => otherIndex !== index && other.type === track.type)
+    if (!target) return false
+    target.items.push(...track.items)
+  }
+  tracks.splice(index, 1)
+  return true
+}
+
 function defaultTransform() {
   return { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }
 }
@@ -124,7 +179,8 @@ export function addClip(timeline, trackType, partial = {}) {
     fontSize: partial.fontSize ?? 36,
     effects: Array.isArray(partial.effects) ? partial.effects : [],
     keyframes: Array.isArray(partial.keyframes) ? partial.keyframes : [],
-    transitionIn: partial.transitionIn
+    transitionIn: partial.transitionIn,
+    fade: partial.fade
   }
   track.items.push(clip)
   return clip
@@ -163,6 +219,10 @@ export function splitClip(timeline, clipId, splitTimeTicks) {
     source: { in: splitSourceTime, out: originalOut },
     timeline: { start: splitTimeTicks, duration: Math.max(1, clipEnd - splitTimeTicks) }
   }
+  // The tail's incoming neighbor changed: the inherited transition only
+  // ever described the ORIGINAL pair (the first half keeps it — its start
+  // still overlaps the previous clip) (R34/B3).
+  delete second.transitionIn
   track.items.splice(index + 1, 0, second)
   return second
 }

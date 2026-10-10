@@ -51,6 +51,47 @@ describe('v1compat', () => {
     assert.equal(tracks[0].items[0].in, 2)
   })
 
+  it('detects relation-only changes (groupId/linkId)', () => {
+    const tracks = v1Tracks()
+    const v3 = v1TracksToV3(tracks)
+    // Group/link-only mutations must not be mistaken for "untouched" —
+    // syncV3Result would silently drop them (C9).
+    v3.tracks[0].items[0].groupId = 'grp_new'
+    assert.equal(v1MatchesV3(tracks[0].items[0], v3.tracks[0].items[0]), false)
+    const stats = syncV3Result(tracks, v3)
+    assert.deepEqual(stats, { added: 0, updated: 1, removed: 0 })
+    assert.equal(tracks[0].items[0].groupId, 'grp_new')
+  })
+
+  it('detects transition-only changes (transitionIn)', () => {
+    const tracks = v1Tracks()
+    tracks[0].items[0].transitionIn = { type: 'fade', duration: secToTicks(0.5) }
+    const clip = v1TracksToV3(tracks).tracks[0].items[0]
+    assert.ok(v1MatchesV3(tracks[0].items[0], clip))
+    // Clearing must be detected even though the restored offset
+    // round-trips equal — otherwise syncV3Result keeps the stale
+    // transition forever (R34/B3).
+    const cleared = { ...clip }
+    delete cleared.transitionIn
+    assert.equal(v1MatchesV3(tracks[0].items[0], cleared), false)
+    const retyped = { ...clip, transitionIn: { type: 'wipe-left', duration: secToTicks(0.5) } }
+    assert.equal(v1MatchesV3(tracks[0].items[0], retyped), false)
+  })
+
+  it('detects fade-only changes (fade envelope)', () => {
+    const tracks = v1Tracks()
+    tracks[0].items[0].fade = { in: secToTicks(0.5), out: 0 }
+    const clip = v1TracksToV3(tracks).tracks[0].items[0]
+    assert.ok(v1MatchesV3(tracks[0].items[0], clip))
+    // Clearing must sync back even though no numeric field changed,
+    // otherwise syncV3Result keeps the stale fade forever (R38/C12).
+    const cleared = { ...clip }
+    delete cleared.fade
+    assert.equal(v1MatchesV3(tracks[0].items[0], cleared), false)
+    const resized = { ...clip, fade: { in: secToTicks(1), out: 0 } }
+    assert.equal(v1MatchesV3(tracks[0].items[0], resized), false)
+  })
+
   it('merges core op results back by id', () => {
     const tracks = v1Tracks()
     const v3 = v1TracksToV3(tracks)
@@ -71,5 +112,26 @@ describe('v1compat', () => {
     assert.equal(tracks[0].items.length, 1)
     assert.equal(tracks[0].items[0].id, 'b')
     assert.equal(tracks[0].items[0].offset, 0)
+  })
+
+  it('syncs track add/remove at the track level', () => {
+    const tracks = [
+      { id: 't-video-1', type: 'video', name: 'Video 1', items: [v1Clip()] },
+      { id: 't-audio-1', type: 'audio', name: 'Audio 1', items: [] }
+    ]
+    const v3 = v1TracksToV3(tracks)
+
+    // A v3-only track is created back as a v1 track...
+    v3.tracks.push({ id: 't-video-2', type: 'video', name: 'Video 2', items: [] })
+    syncV3Result(tracks, v3)
+    assert.equal(tracks.length, 3)
+    assert.equal(tracks[2].id, 't-video-2')
+    assert.equal(tracks[2].name, 'Video 2')
+
+    // ...and a v1 track missing from v3 is dropped with its clips.
+    v3.tracks = v3.tracks.filter(track => track.id !== 't-video-1')
+    const stats = syncV3Result(tracks, v3)
+    assert.equal(stats.removed, 1)
+    assert.deepEqual(tracks.map(track => track.id), ['t-audio-1', 't-video-2'])
   })
 })

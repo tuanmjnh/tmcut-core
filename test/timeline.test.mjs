@@ -7,6 +7,9 @@ import {
   totalDurationTicks,
   findClip,
   ensureTrack,
+  nextTrackName,
+  addTrack,
+  removeTrack,
   addClip,
   removeClip,
   splitClip,
@@ -61,6 +64,20 @@ describe('timeline', () => {
     assert.equal(totalDurationTicks(timeline), secToTicks(10))
   })
 
+  it('does not hand the transition to the split tail', () => {
+    const timeline = makeTimeline()
+    const clip = addClip(timeline, 'video', {
+      source: { in: 0, out: secToTicks(10) },
+      transitionIn: { type: 'fade', duration: secToTicks(0.5) }
+    })
+    const second = splitClip(timeline, clip.id, secToTicks(4))
+    assert.ok(second)
+    // The tail's incoming neighbor changed: only the first half keeps the
+    // transition (its start still touches the original previous clip).
+    assert.deepEqual(clip.transitionIn, { type: 'fade', duration: secToTicks(0.5) })
+    assert.equal(second.transitionIn, undefined)
+  })
+
   it('rejects out-of-range splits', () => {
     const timeline = makeTimeline()
     const clip = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(10) } })
@@ -101,5 +118,37 @@ describe('timeline', () => {
     const bad = makeTimeline()
     bad.tracks.push({ id: 't-x', type: 'hologram', items: [{ id: 'c1', source: { in: 5, out: 5 }, timeline: { start: -1, duration: 0 }, speed: 0 }] })
     assert.ok(validateTimeline(bad).length >= 4)
+  })
+
+  it('adds uniquely named tracks and removes them (Roadmap C8)', () => {
+    const timeline = makeTimeline() // Text, Video 1, Audio 1
+    assert.equal(nextTrackName(timeline, 'video'), 'Video 2')
+    const added = addTrack(timeline, 'video')
+    assert.equal(added.name, 'Video 2')
+    assert.equal(timeline.tracks.length, 4)
+    assert.equal(nextTrackName(timeline, 'text'), 'Text 2')
+
+    // keepClips re-homes the clips onto the other same-type track.
+    addClip(timeline, 'video', { source: { in: 0, out: secToTicks(5) } })
+    const before = totalDurationTicks(timeline)
+    assert.equal(removeTrack(timeline, 't-video-1', { keepClips: true }), true)
+    assert.equal(timeline.tracks.length, 3)
+    assert.equal(totalDurationTicks(timeline), before)
+
+    // keepClips refuses when no same-type target is left; track stays.
+    assert.equal(removeTrack(timeline, added.id, { keepClips: true }), false)
+    assert.equal(timeline.tracks.length, 3)
+
+    // Locked tracks are refused (core lock guards).
+    const held = timeline.tracks.find(track => track.id === added.id)
+    held.locked = true
+    assert.equal(removeTrack(timeline, added.id), false)
+    held.locked = false
+
+    // Unknown ids fail; plain removal drops the track with its clips.
+    assert.equal(removeTrack(timeline, 'missing'), false)
+    assert.equal(removeTrack(timeline, added.id), true)
+    assert.equal(timeline.tracks.length, 2)
+    assert.deepEqual(timeline.tracks.map(track => track.id), ['t-text-1', 't-audio-1'])
   })
 })

@@ -5,6 +5,8 @@
 //  any apply step, never trust model output shape.
 // =============================================================================
 
+import { secToTicks } from './time.mjs'
+
 const PROFILES = ['viral-shorts', 'podcast-summary', 'cinematic-vlog']
 
 function isFiniteNumber(value) {
@@ -58,4 +60,51 @@ export function selectSegments(edl, minScore = 0.5) {
     .filter(segment => isFiniteNumber(segment.score) && segment.score >= minScore)
     .slice()
     .sort((a, b) => a.start - b.start)
+}
+
+/**
+ * Convert EDL segments (media time, seconds) into core clip inputs — the
+ * glue between AutoCut analysis and the timeline (Roadmap C10).
+ *
+ * - An INVALID EDL converts to nothing (never trust model output).
+ * - Segments without a positive span are dropped, the rest sorted by start.
+ * - Kept segments CONCATENATE on the timeline by default (the autocut
+ *   draft flow removes source dead air). Pass `minGapTicks` to PRESERVE
+ *   source pauses at or above that threshold — smaller gaps still close,
+ *   so every gap in the output is >= minGapTicks.
+ * - `trackType` guards intent for future audio EDLs; the clip shape is
+ *   currently identical for video and audio, and 'text' is refused.
+ * - Output uses v3 ticks (`in`/`out`/`offset`); the legacy v1 seconds
+ *   editor converts at the boundary (ticksToSec) like every core bridge.
+ */
+export function segmentsToClips(edl, segments, options = {}) {
+  if (!edl || validateEdl(edl).length > 0) return []
+  const { minGapTicks = null, trackType = 'video' } = options
+  if (!['video', 'audio'].includes(trackType)) return []
+  if (!Array.isArray(segments)) return []
+  const clean = segments
+    .filter(segment => segment
+      && typeof segment === 'object'
+      && isFiniteNumber(segment.start)
+      && isFiniteNumber(segment.end)
+      && segment.start >= 0
+      && segment.end > segment.start)
+    .slice()
+    .sort((a, b) => a.start - b.start)
+  const clips = []
+  let cursor = 0
+  let previousEndTicks = null
+  for (const segment of clean) {
+    const start = secToTicks(segment.start)
+    const end = secToTicks(segment.end)
+    if (previousEndTicks !== null && isFiniteNumber(minGapTicks)) {
+      const gap = start - previousEndTicks
+      // Real pauses survive; micro gaps close into the concatenation.
+      if (gap >= minGapTicks) cursor += gap
+    }
+    clips.push({ in: start, out: end, offset: cursor })
+    cursor += end - start
+    previousEndTicks = end
+  }
+  return clips
 }

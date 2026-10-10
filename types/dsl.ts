@@ -110,6 +110,8 @@ export interface TmcutTimelineClip {
   effects: TmcutClipEffect[]
   keyframes: TmcutKeyframe[]
   transitionIn?: TmcutTransition
+  /** Fade in/out audio envelope, in TICKS (Roadmap C12). */
+  fade?: { in: MediaTime, out: MediaTime }
 }
 
 export interface TmcutTrack {

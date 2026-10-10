@@ -58,6 +58,58 @@ export function createHistory(limit = 50) {
     clear() {
       past.length = 0
       future.length = 0
+    },
+    // Internal accessors for coalesce/pushBatch (docs C15). Not part of
+    // the regular undo/redo contract — callers should not rely on them.
+    _top() {
+      return past.length ? past[past.length - 1] : null
+    },
+    _replaceAfter(after) {
+      if (past.length === 0) return
+      past[past.length - 1].after = clone(after)
+      future.length = 0 // a new edit invalidates redo, like commit
     }
   }
+}
+
+/**
+ * Commit many mutations as ONE undo entry spanning first.before →
+ * last.after (docs C15). Empty or single-entry lists degrade to a
+ * regular commit.
+ */
+export function pushBatch(history, entries, label) {
+  const list = Array.isArray(entries) ? entries.filter(Boolean) : []
+  if (list.length === 0) return
+  const first = list[0]
+  const last = list[list.length - 1]
+  history.commit({
+    name: first.name ?? 'batch',
+    label: label ?? first.label ?? 'batch',
+    before: first.before,
+    after: last.after
+  })
+}
+
+/**
+ * Commit unless the top entry has the same name and was created less
+ * than `windowMs` ago — then extend that entry's after-state in place
+ * so a burst of edits (typing a text, dragging a slider) stays ONE
+ * undo (docs C15). `windowMs` is wall-clock time on purpose: ticks are
+ * media time and cannot measure typing pauses. Returns true when
+ * coalesced, false when a new entry was committed.
+ */
+export function coalesce(history, entry, windowMs = 800) {
+  if (!entry || !entry.before || !entry.after) {
+    throw new Error('history.coalesce requires { name, before, after }')
+  }
+  const window = Number.isFinite(windowMs) ? Math.max(0, windowMs) : 800
+  const name = entry.name ?? 'custom'
+  const top = typeof history._top === 'function' ? history._top() : null
+  const createdAt = top ? Date.parse(top.createdAt) : NaN
+  if (top && top.name === name && Date.now() - createdAt <= window) {
+    history._replaceAfter(entry.after)
+    return true
+  }
+  history.commit(entry)
+  return false
 }

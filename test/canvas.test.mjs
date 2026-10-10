@@ -10,8 +10,11 @@ import {
   normalizeCanvas,
   computeFitObjectStyle,
   buildFfmpegFitFilters,
+  buildFfmpegTransform,
   reframeTransform,
-  previewScale
+  previewScale,
+  safeAreaRects,
+  SAFE_AREA_PRESETS
 } from '../src/canvas.mjs'
 
 describe('canvas', () => {
@@ -65,6 +68,59 @@ describe('canvas', () => {
     assert.equal(cropped.length, 2)
   })
 
+  it('appends rotation after the fit filters (roadmap C7)', () => {
+    const rot = buildFfmpegFitFilters('fit', 1920, 1080, { rotation: 90, padColor: '#101010' })
+    assert.equal(rot.length, 2)
+    assert.equal(rot[1], 'rotate=90*PI/180:ow=iw:oh=ih:fillcolor=#101010')
+    // Order: rotate comes AFTER every fit filter (fill = single chain string).
+    const fillRot = buildFfmpegFitFilters('fill', 1920, 1080, { rotation: -45 })
+    assert.equal(fillRot.length, 2)
+    assert.ok(fillRot[1].startsWith('rotate=-45*PI/180'))
+    // Identity rotations append nothing (byte-identical legacy output).
+    assert.equal(buildFfmpegFitFilters('fit', 1920, 1080, { rotation: 0 }).length, 1)
+    assert.equal(buildFfmpegFitFilters('fit', 1920, 1080, { rotation: 360 }).length, 1)
+    assert.equal(buildFfmpegFitFilters('fit', 1920, 1080, {}).length, 1)
+    // Default fill color for the uncovered corners.
+    assert.ok(buildFfmpegFitFilters('stretch', 640, 360, { rotation: 30 })[1].endsWith('fillcolor=black'))
+  })
+
+  it('returns null for the identity transform', () => {
+    assert.equal(buildFfmpegTransform({ canvasW: 1920, canvasH: 1080 }), null)
+    assert.equal(buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: 100, x: 0, y: 0 }), null)
+    assert.equal(buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: undefined, x: undefined, y: undefined }), null)
+  })
+
+  it('builds a centered scale transform with background overlay', () => {
+    const t = buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: 50, fps: 30, duration: 4, bgColor: '#000000' })
+    assert.equal(t.tail, 'scale=960:540')
+    assert.equal(t.overlay, 'overlay=x=480:y=270:shortest=1')
+    assert.ok(t.bg.startsWith('color=c=#000000:s=1920x1080:r=30:d=6.000')) // duration + 2s headroom
+  })
+
+  it('applies offsets and rounds to whole pixels', () => {
+    const t = buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: 100, x: -100.4, y: 50.6 })
+    assert.equal(t.overlay, 'overlay=x=-100:y=51:shortest=1')
+    assert.equal(t.tail, 'scale=1920:1080')
+    const up = buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: 150, x: 20, y: -30 })
+    assert.equal(up.tail, 'scale=2880:1620')
+    assert.equal(up.overlay, 'overlay=x=-460:y=-300:shortest=1') // (1920-2880)/2+20, (1080-1620)/2-30
+  })
+
+  it('evenizes odd canvases and clamps degenerate scales', () => {
+    const t = buildFfmpegTransform({ canvasW: 1919, canvasH: 1079, scale: 100.0001, x: 1 })
+    assert.ok(t.bg.includes('s=1918x1078'))
+    const tiny = buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: 0 })
+    assert.equal(tiny.tail, 'scale=20:10') // clamped to 1% of the evenized canvas
+    const neg = buildFfmpegTransform({ canvasW: 1920, canvasH: 1080, scale: -50, x: 1 })
+    assert.equal(neg.tail, 'scale=20:10')
+  })
+
+  it('applies default fps and duration when omitted', () => {
+    const t = buildFfmpegTransform({ canvasW: 1000, canvasH: 500, scale: 200 })
+    assert.ok(t.bg.includes(':r=30:d=3.000')) // default duration 1 + 2s headroom
+    assert.equal(t.overlay, 'overlay=x=-500:y=-250:shortest=1')
+  })
+
   it('reframes offsets proportionally', () => {
     assert.deepEqual(reframeTransform(100, 50, 1920, 1080, 1080, 1920), { x: 56, y: 89 })
     assert.deepEqual(reframeTransform(10, 20, 0, 0, 5, 5), { x: 10, y: 20 })
@@ -75,5 +131,34 @@ describe('canvas', () => {
     assert.equal(previewScale(1920, 1920), 1)
     assert.equal(previewScale(0, 1920), 1)
     assert.equal(previewScale(960, 0), 1)
+  })
+})
+
+describe('safe areas (C13)', () => {
+  it('centers action safe 0.9 and title safe 0.8 on any canvas', () => {
+    for (const canvas of [{ width: 1920, height: 1080 }, { width: 1080, height: 1920 }, { width: 1000, height: 1000 }]) {
+      const { actionSafe, titleSafe } = safeAreaRects(canvas)
+      assert.deepEqual(actionSafe, { x: 0.05, y: 0.05, w: 0.9, h: 0.9 })
+      assert.deepEqual(titleSafe, { x: 0.1, y: 0.1, w: 0.8, h: 0.8 })
+    }
+  })
+
+  it('yields zero rects for invalid canvases', () => {
+    for (const canvas of [null, undefined, {}, { width: 0, height: 1080 }, { width: 1920, height: NaN }]) {
+      assert.deepEqual(safeAreaRects(canvas), {
+        actionSafe: { x: 0, y: 0, w: 0, h: 0 },
+        titleSafe: { x: 0, y: 0, w: 0, h: 0 }
+      })
+    }
+  })
+
+  it('ships unique ratio presets with real numbers', () => {
+    const ids = SAFE_AREA_PRESETS.map(preset => preset.id)
+    assert.equal(new Set(ids).size, ids.length)
+    for (const preset of SAFE_AREA_PRESETS) {
+      assert.ok(preset.label.length > 0)
+      assert.ok(Number.isFinite(preset.ratio) && preset.ratio > 0)
+    }
+    assert.ok(ids.includes('16-9') && ids.includes('9-16') && ids.includes('1-1'))
   })
 })

@@ -7,7 +7,10 @@ import {
   copyClips,
   pasteClips,
   rippleDelete,
-  snapTime
+  insertClipRipple,
+  closeGaps,
+  snapTime,
+  snapTimeDetailed
 } from '../src/editing.mjs'
 import { addClip, removeClip, splitClip, moveClip, trimClip, totalDurationTicks } from '../src/timeline.mjs'
 import { secToTicks, TICKS_PER_SECOND } from '../src/time.mjs'
@@ -118,5 +121,108 @@ describe('editing', () => {
     assert.equal(snapTime(timeline, 50, { playheadTicks: 55 }), 55)
     assert.equal(snapTime(timeline, 50, { playheadTicks: 55, ignoreIds: [] }), 55)
     assert.equal(snapTime(timeline, -30, {}), 0)
+  })
+
+  it('snapTimeDetailed reports what it snapped to', () => {
+    const { timeline, first, second } = videoTimeline()
+    const secondEnd = second.timeline.start + secToTicks(4)
+
+    // Just past the shared boundary between the two clips: the position
+    // snaps to that boundary (second's start === first's end; the first
+    // candidate pushed wins the tie, so either kind is valid).
+    const near = second.timeline.start + Math.round(TICKS_PER_SECOND * 0.04)
+    const toStart = snapTimeDetailed(timeline, near, {})
+    assert.equal(toStart.ticks, second.timeline.start)
+    assert.ok(toStart.snapped)
+    assert.ok(['clip-start', 'clip-end'].includes(toStart.snapped.kind))
+    assert.ok([first.id, second.id].includes(toStart.snapped.fromId))
+
+    // Playhead beats a distant clip edge (tight threshold).
+    const toPlayhead = snapTimeDetailed(timeline, 50, { playheadTicks: 55, thresholdTicks: 60 })
+    assert.equal(toPlayhead.ticks, 55)
+    assert.equal(toPlayhead.snapped?.kind, 'playhead')
+
+    // Project start (0) is a candidate.
+    const toZero = snapTimeDetailed(timeline, 40, { thresholdTicks: 60 })
+    assert.equal(toZero.ticks, 0)
+    assert.equal(toZero.snapped?.kind, 'zero')
+
+    // Nothing within the threshold: position is only clamped, snapped is null.
+    const far = second.timeline.start + TICKS_PER_SECOND
+    const noSnap = snapTimeDetailed(timeline, far, {})
+    assert.equal(noSnap.ticks, far)
+    assert.equal(noSnap.snapped, null)
+
+    // ignoreIds excludes the dragged clip's OWN edges: near its end there
+    // is no other candidate, so nothing snaps...
+    const own = snapTimeDetailed(timeline, secondEnd - 10, {
+      thresholdTicks: 60,
+      ignoreIds: [second.id]
+    })
+    assert.equal(own.snapped, null)
+    // ...while the same spot snaps to its own end when not ignored.
+    const selfSnap = snapTimeDetailed(timeline, secondEnd - 10, { thresholdTicks: 60 })
+    assert.equal(selfSnap.snapped?.kind, 'clip-end')
+    assert.equal(selfSnap.snapped?.fromId, second.id)
+  })
+})
+
+describe('ripple insert & close gaps (C2)', () => {
+  it('inserts with ripple: later clips shift by the new duration', () => {
+    const timeline = defaultTimeline()
+    addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, timeline: { start: 0 } })
+    addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, timeline: { start: secToTicks(2) } })
+    const result = insertClipRipple(timeline, 'video', { source: { in: 0, out: secToTicks(1) } }, secToTicks(1))
+    assert.ok(result)
+    // Only the clip at 2s starts at/after 1s → it moves to 3s; 0s stays.
+    assert.equal(result.shifted, 1)
+    const track = timeline.tracks.find(t => t.type === 'video')
+    const inserted = track.items.find(i => i.id === result.clip.id)
+    assert.equal(inserted.timeline.start, secToTicks(1))
+    const starts = track.items.filter(i => i.id !== result.clip.id).map(i => i.timeline.start).sort((a, b) => a - b)
+    assert.deepEqual(starts, [0, secToTicks(3)])
+  })
+
+  it('shifts across tracks on request and never touches locked tracks', () => {
+    const timeline = defaultTimeline()
+    const video = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, timeline: { start: secToTicks(2) } })
+    const audio = addClip(timeline, 'audio', { source: { in: 0, out: secToTicks(2) }, timeline: { start: secToTicks(2) } })
+    const result = insertClipRipple(timeline, 'video', { source: { in: 0, out: secToTicks(1) } }, 0, { acrossTracks: true })
+    assert.ok(result)
+    assert.equal(result.shifted, 2)
+    assert.equal(video.timeline.start, secToTicks(3))
+    assert.equal(audio.timeline.start, secToTicks(3))
+    // A locked target track refuses the insert entirely.
+    timeline.tracks.find(t => t.type === 'video').locked = true
+    assert.equal(insertClipRipple(timeline, 'video', { source: { in: 0, out: 100 } }, 0), null)
+  })
+
+  it('inserts into empty timelines and past the end without shifting', () => {
+    const timeline = defaultTimeline()
+    const empty = insertClipRipple(timeline, 'video', { source: { in: 0, out: secToTicks(3) } }, 0)
+    assert.ok(empty)
+    assert.equal(empty.shifted, 0)
+    const past = insertClipRipple(timeline, 'video', { source: { in: 0, out: secToTicks(1) } }, secToTicks(30))
+    assert.ok(past)
+    assert.equal(past.shifted, 0)
+  })
+
+  it('closes gaps per track and reports seconds', () => {
+    const timeline = defaultTimeline()
+    // video: [0..2s] [5..7s] → 3s of gap; audio keeps a 4s gap.
+    addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, timeline: { start: 0 } })
+    const videoSecond = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, timeline: { start: secToTicks(5) } })
+    const audioOnly = addClip(timeline, 'audio', { source: { in: 0, out: secToTicks(1) }, timeline: { start: secToTicks(4) } })
+    assert.equal(closeGaps(timeline, { trackType: 'video' }), 3)
+    assert.equal(videoSecond.timeline.start, secToTicks(2))
+    assert.equal(audioOnly.timeline.start, secToTicks(4)) // untouched
+    assert.equal(closeGaps(timeline), 4) // the audio gap now closes too
+    assert.equal(audioOnly.timeline.start, 0)
+    assert.equal(closeGaps(timeline), 0) // nothing left to close
+    // Locked tracks are skipped entirely.
+    const locked = defaultTimeline()
+    addClip(locked, 'video', { source: { in: 0, out: secToTicks(1) }, timeline: { start: secToTicks(3) } })
+    locked.tracks.find(t => t.type === 'video').locked = true
+    assert.equal(closeGaps(locked), 0)
   })
 })

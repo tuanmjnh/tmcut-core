@@ -7,7 +7,9 @@ import {
   selectAllClips,
   selectTrackClips,
   expandRelated,
-  resolveClips
+  resolveClips,
+  groupClips,
+  ungroupClips
 } from '../src/selection.mjs'
 import { addMarker, removeMarker, moveMarker, markersInRange } from '../src/markers.mjs'
 import { addClip } from '../src/timeline.mjs'
@@ -50,6 +52,55 @@ describe('selection', () => {
     const resolved = resolveClips(timeline, [clip.id, 'ghost'])
     assert.equal(resolved.length, 1)
     assert.equal(resolved[0].clip.id, clip.id)
+  })
+})
+
+describe('groups (C9)', () => {
+  it('groups two or more clips under one fresh groupId', () => {
+    const timeline = defaultTimeline()
+    const a = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) } })
+    const b = addClip(timeline, 'video', { source: { in: secToTicks(2), out: secToTicks(4) } })
+    const groupId = groupClips(timeline, [a.id, b.id])
+    assert.equal(typeof groupId, 'string')
+    assert.equal(a.groupId, groupId)
+    assert.equal(b.groupId, groupId)
+    // Selecting one member expands to the whole group.
+    assert.deepEqual(expandRelated(timeline, [a.id]).sort(), [a.id, b.id].sort())
+  })
+
+  it('merges existing groups and ignores unknown ids', () => {
+    const timeline = defaultTimeline()
+    const a = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, groupId: 'old-a' })
+    const b = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) }, groupId: 'old-b' })
+    const groupId = groupClips(timeline, [a.id, b.id, 'ghost'])
+    assert.ok(groupId)
+    assert.equal(a.groupId, groupId)
+    assert.equal(b.groupId, groupId)
+  })
+
+  it('refuses to group fewer than two clips', () => {
+    const timeline = defaultTimeline()
+    const a = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) } })
+    assert.equal(groupClips(timeline, []), null)
+    assert.equal(groupClips(timeline, [a.id]), null)
+    assert.equal(groupClips(timeline, [a.id, 'ghost']), null)
+    assert.ok(!a.groupId)
+  })
+
+  it('ungroups resolved clips and skips locked tracks', () => {
+    const timeline = defaultTimeline()
+    const a = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) } })
+    const b = addClip(timeline, 'audio', { source: { in: 0, out: secToTicks(2) } })
+    const solo = addClip(timeline, 'video', { source: { in: 0, out: secToTicks(2) } })
+    const groupId = groupClips(timeline, [a.id, b.id])
+    assert.ok(groupId)
+    // Solo clips cost nothing; locked tracks are untouchable.
+    assert.equal(ungroupClips(timeline, [a.id, b.id, solo.id]), 2)
+    assert.ok(!a.groupId)
+    assert.ok(!b.groupId)
+    const lockedTrack = timeline.tracks.find(t => t.type === 'audio')
+    lockedTrack.locked = true
+    assert.equal(groupClips(timeline, [a.id, b.id]), null)
   })
 })
 

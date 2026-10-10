@@ -6,7 +6,7 @@
 // =============================================================================
 
 import { TICKS_PER_SECOND } from './time.mjs'
-import { clipDurationTicks, clipEndTicks, ensureTrack, findClip } from './timeline.mjs'
+import { addClip, clipDurationTicks, clipEndTicks, ensureTrack, findClip } from './timeline.mjs'
 import { createSelection, expandRelated } from './selection.mjs'
 
 let editCounter = 0
@@ -168,37 +168,106 @@ export function rippleDelete(timeline, clipId, options = {}) {
 }
 
 /**
- * Magnetic snapping (docs Phase 2): snap a tick position to the nearest
- * candidate (0, playhead, clip starts/ends, marker positions) within
- * `thresholdTicks` (default 0.08s). `ignoreIds` excludes clips being
- * dragged so they never snap to themselves.
+ * Ripple insert (docs C2): place a NEW clip at `atTicks` and shift every
+ * clip starting at or after that position right by the new duration.
+ * `partial` accepts v3 clip fields (see addClip). A locked target track
+ * refuses the insert (null) and locked tracks never shift; with
+ * `acrossTracks` the shift applies to every unlocked track (keeps A/V
+ * sync), otherwise only the target track moves.
  */
-export function snapTime(timeline, targetTicks, options = {}) {
+export function insertClipRipple(timeline, trackType, partial, atTicks, options = {}) {
+  const target = Math.max(0, Math.round(atTicks))
+  const clip = addClip(timeline, trackType, {
+    ...partial,
+    timeline: { ...(partial?.timeline ?? {}), start: target }
+  })
+  if (!clip) return null
+  const gap = clipDurationTicks(clip)
+  const tracks = options.acrossTracks
+    ? (timeline?.tracks ?? []).filter(track => !isLockedTrack(track))
+    : [findClip(timeline, clip.id)?.track].filter(Boolean)
+  let shifted = 0
+  for (const track of tracks) {
+    for (const item of track.items ?? []) {
+      if (item.id === clip.id) continue
+      if (item.timeline.start >= target) {
+        item.timeline.start += gap
+        shifted += 1
+      }
+    }
+  }
+  return { clip, shifted }
+}
+
+/**
+ * Close gaps (docs C2): pull every clip left until it touches its
+ * predecessor on the same track (the leading gap closes down to 0).
+ * Locked tracks are skipped; `trackType` restricts the work to one
+ * type; `acrossTracks: false` touches only the first eligible track.
+ * Returns the SECONDS closed — the one core API that answers in
+ * seconds because it feeds a UI readout directly (docs C2).
+ */
+export function closeGaps(timeline, options = {}) {
+  const across = options.acrossTracks !== false
+  let closedTicks = 0
+  for (const track of timeline?.tracks ?? []) {
+    if (isLockedTrack(track)) continue
+    if (options.trackType && track.type !== options.trackType) continue
+    const items = [...(track.items ?? [])].sort((a, b) => a.timeline.start - b.timeline.start)
+    let cursor = 0
+    for (const item of items) {
+      if (item.timeline.start > cursor) {
+        closedTicks += item.timeline.start - cursor
+        item.timeline.start = cursor
+      }
+      cursor = clipEndTicks(item)
+    }
+    if (!across) break
+  }
+  return closedTicks / TICKS_PER_SECOND
+}
+
+/**
+ * Magnetic snapping with origin metadata (Roadmap C1): snap a tick
+ * position to the nearest candidate (0, playhead, clip starts/ends,
+ * marker positions) within `thresholdTicks` (default 0.08s). Returns the
+ * snapped position plus WHAT it snapped to (`kind` + `fromId`), or the
+ * clamped target with `snapped: null` when nothing is close enough.
+ * `ignoreIds` excludes clips being dragged so they never snap to
+ * themselves.
+ */
+export function snapTimeDetailed(timeline, targetTicks, options = {}) {
   const threshold = Number.isFinite(options.thresholdTicks)
     ? Math.max(0, options.thresholdTicks)
     : Math.round(TICKS_PER_SECOND * 0.08)
   const ignored = new Set(createSelection(options.ignoreIds))
-  const candidates = [0]
+  const candidates = [{ ticks: 0, kind: 'zero' }]
   if (Number.isFinite(options.playheadTicks) && options.playheadTicks >= 0) {
-    candidates.push(Math.round(options.playheadTicks))
+    candidates.push({ ticks: Math.round(options.playheadTicks), kind: 'playhead' })
   }
   for (const track of timeline?.tracks ?? []) {
     for (const item of track.items ?? []) {
       if (!item || ignored.has(item.id)) continue
-      candidates.push(item.timeline.start, clipEndTicks(item))
+      candidates.push({ ticks: item.timeline.start, kind: 'clip-start', fromId: item.id })
+      candidates.push({ ticks: clipEndTicks(item), kind: 'clip-end', fromId: item.id })
     }
   }
   for (const marker of timeline?.markers ?? []) {
-    if (Number.isFinite(marker.at)) candidates.push(marker.at)
+    if (Number.isFinite(marker.at)) candidates.push({ ticks: marker.at, kind: 'marker' })
   }
-  let best = Math.max(0, Math.round(targetTicks))
+  let best = null
   let bestDist = threshold + 1
   for (const candidate of candidates) {
-    const dist = Math.abs(candidate - targetTicks)
+    const dist = Math.abs(candidate.ticks - targetTicks)
     if (dist < bestDist) {
       bestDist = dist
       best = candidate
     }
   }
-  return bestDist <= threshold ? best : Math.max(0, Math.round(targetTicks))
+  if (best && bestDist <= threshold) return { ticks: best.ticks, snapped: best }
+  return { ticks: Math.max(0, Math.round(targetTicks)), snapped: null }
+}
+
+export function snapTime(timeline, targetTicks, options = {}) {
+  return snapTimeDetailed(timeline, targetTicks, options).ticks
 }

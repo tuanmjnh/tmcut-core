@@ -1,7 +1,7 @@
 // @tmcut/core — history + project tests. Run: node --test test/
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createHistory } from '../src/history.mjs'
+import { createHistory, pushBatch, coalesce } from '../src/history.mjs'
 import {
   createProject,
   defaultCanvas,
@@ -45,6 +45,62 @@ describe('history', () => {
     assert.equal(history.undo(), null)
     assert.equal(history.redo(), null)
     assert.throws(() => history.commit({ name: 'x' }), /requires/)
+  })
+
+  it('batches many entries into one undo (C15 pushBatch)', () => {
+    const history = createHistory(10)
+    const first = defaultTimeline()
+    const middle = defaultTimeline()
+    const last = defaultTimeline()
+    addClip(last, 'video', { source: { in: 0, out: secToTicks(3) } })
+    history.commit({ name: 'seed', before: defaultTimeline(), after: defaultTimeline() })
+    pushBatch(history, [
+      { name: 'a', before: first, after: middle },
+      { name: 'b', before: middle, after: last }
+    ], 'Paste 2 clips')
+    assert.equal(history.depth, 2) // seed + one batched entry
+    const restored = history.undo()
+    assert.equal(restored.tracks[1].items.length, 0) // back to first.before
+    const redone = history.redo()
+    assert.equal(redone.tracks[1].items.length, 1) // forward to last.after
+    // Empty batches are a no-op.
+    pushBatch(history, [])
+    assert.equal(history.depth, 2)
+  })
+
+  it('coalesces same-name bursts into one entry (C15)', () => {
+    const history = createHistory(10)
+    const start = defaultTimeline()
+    const typed1 = defaultTimeline()
+    const typed2 = defaultTimeline()
+    addClip(typed2, 'text', { source: { in: 0, out: secToTicks(1) } })
+    // Empty stack → regular commit.
+    assert.equal(coalesce(history, { name: 'edit-text', before: start, after: typed1 }, 800), false)
+    assert.equal(history.depth, 1)
+    // Same name, just now → merged; the burst keeps ONE undo entry.
+    assert.equal(coalesce(history, { name: 'edit-text', before: typed1, after: typed2 }, 800), true)
+    assert.equal(history.depth, 1)
+    const restored = history.undo()
+    assert.equal(restored.tracks[1].items.length, 0) // whole burst undone at once
+    // A different name never merges.
+    assert.equal(coalesce(history, { name: 'other', before: start, after: typed1 }, 800), false)
+    assert.equal(history.depth, 1)
+  })
+
+  it('stays outside the window and invalidates redo when merging (C15)', () => {
+    const history = createHistory(10)
+    const blank = () => defaultTimeline()
+    coalesce(history, { name: 'edit-text', before: blank(), after: blank() }, 800)
+    // Age the top entry beyond the window — deterministic clock control.
+    history._top().createdAt = new Date(Date.now() - 5000).toISOString()
+    assert.equal(coalesce(history, { name: 'edit-text', before: blank(), after: blank() }, 1000), false)
+    assert.equal(history.depth, 2)
+    // Merging clears a pending redo, exactly like commit does.
+    history.undo()
+    assert.equal(history.canRedo, true)
+    history._top().createdAt = new Date(Date.now() - 5000).toISOString()
+    assert.equal(coalesce(history, { name: 'edit-text', before: blank(), after: blank() }, 1000), false)
+    assert.equal(history.canRedo, false)
   })
 })
 

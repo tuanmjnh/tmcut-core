@@ -59,7 +59,8 @@ export function v1ClipToV3(item, trackType) {
     fontSize: item.fontSize,
     effects: Array.isArray(item.effects) ? item.effects : [],
     keyframes: Array.isArray(item.keyframes) ? item.keyframes : [],
-    transitionIn: item.transitionIn
+    transitionIn: item.transitionIn,
+    fade: item.fade
   }
 }
 
@@ -107,6 +108,7 @@ export function v3ClipToV1(clip) {
     effects: clip.effects ?? [],
     keyframes: clip.keyframes ?? [],
     transitionIn: clip.transitionIn,
+    fade: clip.fade,
     groupId: clip.groupId ?? null,
     linkId: clip.linkId ?? null
   }
@@ -114,11 +116,36 @@ export function v3ClipToV1(clip) {
 }
 
 const COMPARE_NUMBERS = ['in', 'out', 'offset', 'speed', 'opacity', 'scale', 'x', 'y', 'rotation', 'volume', 'fontSize', 'focusX', 'focusY']
-const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit']
+// groupId/linkId must be compared or relation-only core edits (C9
+// grouping) get silently dropped by syncV3Result. `reverse` stays out:
+// v1 items often lack the field (undefined) while v3 normalizes it to
+// false, so a strict compare would flag every untouched clip.
+const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit', 'groupId', 'linkId']
 
 function sameValue(a, b) {
   if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= EPS
   return a === b
+}
+
+function sameTransition(a, b) {
+  if (a == null && b == null) return true
+  if (a == null || b == null) return false
+  if (a.type !== b.type) return false
+  return sameValue(num(a.duration, 0), num(b.duration, 0))
+}
+
+// fade is an object { in, out } (both TICKS): compared explicitly so
+// CLEARING a fade syncs back (R38/C12), same reasoning as transitionIn.
+function sameFade(a, b) {
+  const aIn = num(a?.in, 0)
+  const aOut = num(a?.out, 0)
+  const bIn = num(b?.in, 0)
+  const bOut = num(b?.out, 0)
+  const aSet = aIn > 0 || aOut > 0
+  const bSet = bIn > 0 || bOut > 0
+  if (aSet !== bSet) return false
+  if (!aSet) return true
+  return sameValue(aIn, bIn) && sameValue(aOut, bOut)
 }
 
 /** True when a v1 item already matches a v3 clip (untouched clips skip). */
@@ -130,6 +157,13 @@ export function v1MatchesV3(item, clip) {
   for (const key of COMPARE_STRINGS) {
     if ((item[key] ?? null) !== (patch[key] ?? null)) return false
   }
+  // transitionIn is an object { type, duration } (duration in TICKS):
+  // compared explicitly so CLEARING a transition syncs back even when the
+  // restored offset round-trips to the same value (R34/B3).
+  if (!sameTransition(item.transitionIn, patch.transitionIn)) return false
+  // fade { in, out } in TICKS: a fade the user clears must sync back
+  // even when no numeric field changed (R38/C12).
+  if (!sameFade(item.fade, patch.fade)) return false
   return true
 }
 
@@ -137,7 +171,9 @@ export function v1MatchesV3(item, clip) {
  * Merge a mutated v3 timeline back into v1 tracks (matched by id).
  * Untouched clips are NOT rewritten (epsilon compare); new ids are
  * appended (creating v1 tracks when the v3 track is unknown); ids absent
- * from v3 are removed. Returns { added, updated, removed }.
+ * from v3 are removed, and so are v1 tracks whose id no longer exists in
+ * v3 (track add/remove flows through here). Returns
+ * { added, updated, removed } for clips.
  */
 export function syncV3Result(v1Tracks, afterV3) {
   const stats = { added: 0, updated: 0, removed: 0 }
@@ -173,6 +209,10 @@ export function syncV3Result(v1Tracks, afterV3) {
         stats.removed += 1
       }
     }
+  }
+  const v3TrackIds = new Set((afterV3?.tracks ?? []).map(track => track.id))
+  for (let index = (v1Tracks ?? []).length - 1; index >= 0; index -= 1) {
+    if (!v3TrackIds.has(v1Tracks[index].id)) v1Tracks.splice(index, 1)
   }
   return stats
 }
