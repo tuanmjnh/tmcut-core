@@ -107,6 +107,16 @@ export interface TmcutTimelineClip {
   text?: string
   color?: string
   fontSize?: number
+  /** Font family shown by the preview overlay (roadmap C-1). */
+  fontFamily?: string
+  /** File of the SAME face the preview family points at, for export drawtext fontfile=. */
+  fontFile?: string
+  /** Text style flags (roadmap C-2): bold/italic select the matching face file app-side; align anchors the block (default center = legacy behavior). */
+  bold?: boolean
+  italic?: boolean
+  align?: 'left' | 'center' | 'right'
+  shadow?: boolean
+  stroke?: boolean
   effects: TmcutClipEffect[]
   keyframes: TmcutKeyframe[]
   transitionIn?: TmcutTransition

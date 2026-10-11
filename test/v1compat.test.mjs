@@ -3,8 +3,9 @@
 // (no app imports — the core stays dependency-free).
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { v1ClipToV3, v1TracksToV3, v1MatchesV3, syncV3Result } from '../src/v1compat.mjs'
+import { v1ClipToV3, v3ClipToV1, v1TracksToV3, v1MatchesV3, syncV3Result } from '../src/v1compat.mjs'
 import { duplicateClips, rippleDelete } from '../src/editing.mjs'
+import { splitClip } from '../src/timeline.mjs'
 import { secToTicks } from '../src/time.mjs'
 
 function v1Clip(partial = {}) {
@@ -90,6 +91,81 @@ describe('v1compat', () => {
     assert.equal(v1MatchesV3(tracks[0].items[0], cleared), false)
     const resized = { ...clip, fade: { in: secToTicks(1), out: 0 } }
     assert.equal(v1MatchesV3(tracks[0].items[0], resized), false)
+  })
+
+  it('carries fontFamily/fontFile across the bridge (C-1)', () => {
+    const v1 = v1Clip({ text: 'Hello', fontFamily: 'Be Vietnam Pro', fontFile: 'C:/Fonts/be.woff2' })
+    const v3 = v1ClipToV3(v1, 'text')
+    assert.equal(v3.fontFamily, 'Be Vietnam Pro')
+    assert.equal(v3.fontFile, 'C:/Fonts/be.woff2')
+    const back = v3ClipToV1(v3)
+    assert.equal(back.fontFamily, 'Be Vietnam Pro')
+    assert.equal(back.fontFile, 'C:/Fonts/be.woff2')
+  })
+
+  it('keeps the picked font on split and duplicate clones (C-1)', () => {
+    // Clone-based core ops copy the v3 clip verbatim — the font must
+    // survive the v1→v3→v1 round trip or the second half silently
+    // reverts to the default face on export.
+    const tracks = [{
+      id: 't-text-1',
+      type: 'text',
+      name: 'Text 1',
+      items: [v1Clip({ id: 'txt_1', text: 'Hello', fontFamily: 'Be Vietnam Pro', fontFile: 'C:/Fonts/be.woff2', in: 0, out: 10, offset: 0 })]
+    }]
+    const v3 = v1TracksToV3(tracks)
+    assert.ok(splitClip(v3, 'txt_1', secToTicks(5)))
+    assert.equal(duplicateClips(v3, ['txt_1'], secToTicks(20)).length, 1)
+    const stats = syncV3Result(tracks, v3)
+    // The first half is updated in place (split shortened its out/duration);
+    // the split tail and the duplicate arrive as new v1 items.
+    assert.deepEqual(stats, { added: 2, updated: 1, removed: 0 })
+    assert.equal(tracks[0].items.length, 3)
+    assert.equal(tracks[0].items[0].out, 5)
+    for (const item of tracks[0].items) {
+      assert.equal(item.fontFamily, 'Be Vietnam Pro')
+      assert.equal(item.fontFile, 'C:/Fonts/be.woff2')
+    }
+  })
+
+  it('detects font-only changes (fontFamily/fontFile)', () => {
+    const tracks = v1Tracks()
+    tracks[0].items[0].fontFamily = 'Arial'
+    tracks[0].items[0].fontFile = 'C:/Windows/Fonts/arial.ttf'
+    const clip = v1TracksToV3(tracks).tracks[0].items[0]
+    assert.ok(v1MatchesV3(tracks[0].items[0], clip))
+    // A font swap must sync back even though no numeric field changed —
+    // otherwise syncV3Result keeps the stale face forever (C-1).
+    const swapped = { ...clip, fontFamily: 'Tahoma' }
+    assert.equal(v1MatchesV3(tracks[0].items[0], swapped), false)
+    tracks[0].items[0].fontFamily = 'Tahoma'
+    assert.ok(v1MatchesV3(tracks[0].items[0], swapped))
+  })
+
+  it('carries text style flags and align across the bridge (C-2)', () => {
+    const v1 = v1Clip({ text: 'Hi', bold: true, italic: true, align: 'right', shadow: true, stroke: true })
+    const back = v3ClipToV1(v1ClipToV3(v1, 'text'))
+    assert.equal(back.bold, true)
+    assert.equal(back.italic, true)
+    assert.equal(back.align, 'right')
+    assert.equal(back.shadow, true)
+    assert.equal(back.stroke, true)
+  })
+
+  it('syncs flag-only and align-only text style changes (C-2)', () => {
+    const tracks = [{ id: 't-text-1', type: 'text', name: 'Text 1', items: [v1Clip({ id: 'txt_1', text: 'Hi' })] }]
+    const v3 = v1TracksToV3(tracks)
+    assert.ok(v1MatchesV3(tracks[0].items[0], v3.tracks[0].items[0]))
+    // Absent flags compare equal to false — only a real toggle syncs.
+    v3.tracks[0].items[0].bold = true
+    v3.tracks[0].items[0].align = 'left'
+    assert.equal(v1MatchesV3(tracks[0].items[0], v3.tracks[0].items[0]), false)
+    const stats = syncV3Result(tracks, v3)
+    assert.deepEqual(stats, { added: 0, updated: 1, removed: 0 })
+    assert.equal(tracks[0].items[0].bold, true)
+    assert.equal(tracks[0].items[0].align, 'left')
+    // The synced-back item matches a fresh conversion (no update loop).
+    assert.ok(v1MatchesV3(tracks[0].items[0], v1TracksToV3(tracks).tracks[0].items[0]))
   })
 
   it('merges core op results back by id', () => {

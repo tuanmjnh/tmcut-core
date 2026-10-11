@@ -355,6 +355,9 @@ export function buildFfmpegTransform(options?: {
   scale?: number
   x?: number
   y?: number
+  scaleExpr?: string | null
+  xExpr?: string | null
+  yExpr?: string | null
   fps?: number
   duration?: number
   bgColor?: string
@@ -395,6 +398,7 @@ export function setKeyframe(clip: { keyframes?: TmcutKeyframe[] } | null | undef
 export function removeKeyframe(clip: { keyframes?: TmcutKeyframe[] } | null | undefined, prop: string, atTicks: number, toleranceTicks?: number): boolean
 export function propsWithKeyframes(clip: { keyframes?: TmcutKeyframe[] } | null | undefined): string[]
 export function keyframeTimes(clip: { keyframes?: TmcutKeyframe[] } | null | undefined, prop: string): number[]
+export function keyframeExpr(clip: { keyframes?: TmcutKeyframe[] } | null | undefined, prop: string, timeVar?: string): string | null
 
 // --- Transitions: overlap model (Roadmap C5) ---
 // `transitionIn.duration` is TIMELINE TICKS (120000/s); applying shifts the

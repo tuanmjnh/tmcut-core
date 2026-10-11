@@ -57,6 +57,13 @@ export function v1ClipToV3(item, trackType) {
     text: item.text,
     color: item.color,
     fontSize: item.fontSize,
+    fontFamily: item.fontFamily,
+    fontFile: item.fontFile,
+    bold: item.bold,
+    italic: item.italic,
+    align: item.align,
+    shadow: item.shadow,
+    stroke: item.stroke,
     effects: Array.isArray(item.effects) ? item.effects : [],
     keyframes: Array.isArray(item.keyframes) ? item.keyframes : [],
     transitionIn: item.transitionIn,
@@ -90,6 +97,13 @@ export function v3ClipToV1(clip) {
     text: clip.text,
     color: clip.color,
     fontSize: clip.fontSize,
+    fontFamily: clip.fontFamily,
+    fontFile: clip.fontFile,
+    bold: clip.bold,
+    italic: clip.italic,
+    align: clip.align,
+    shadow: clip.shadow,
+    stroke: clip.stroke,
     in: round4(ticksToSec(clip.source.in)),
     out: round4(ticksToSec(clip.source.out)),
     offset: round4(ticksToSec(clip.timeline.start)),
@@ -120,7 +134,14 @@ const COMPARE_NUMBERS = ['in', 'out', 'offset', 'speed', 'opacity', 'scale', 'x'
 // grouping) get silently dropped by syncV3Result. `reverse` stays out:
 // v1 items often lack the field (undefined) while v3 normalizes it to
 // false, so a strict compare would flag every untouched clip.
-const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit', 'groupId', 'linkId']
+// fontFamily/fontFile (C-1) must be compared so a font-only edit syncs
+// back AND split/paste/duplicate clones (which copy the v3 clip verbatim)
+// keep the picked face on their new v1 items.
+const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit', 'groupId', 'linkId', 'fontFamily', 'fontFile', 'align']
+// Text style flags (C-2): undefined and false compare EQUAL — v1 items
+// from older projects lack the keys, so a strict compare would rewrite
+// every untouched clip on open.
+const COMPARE_FLAGS = ['bold', 'italic', 'shadow', 'stroke']
 
 function sameValue(a, b) {
   if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= EPS
@@ -156,6 +177,9 @@ export function v1MatchesV3(item, clip) {
   }
   for (const key of COMPARE_STRINGS) {
     if ((item[key] ?? null) !== (patch[key] ?? null)) return false
+  }
+  for (const key of COMPARE_FLAGS) {
+    if ((item[key] ?? false) !== (patch[key] ?? false)) return false
   }
   // transitionIn is an object { type, duration } (duration in TICKS):
   // compared explicitly so CLEARING a transition syncs back even when the

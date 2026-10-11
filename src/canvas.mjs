@@ -208,17 +208,34 @@ export function buildFfmpegTransform(options = {}) {
   if (!(s > 0)) s = 0.01 // degenerate non-positive scale renders near-invisible
   const dx = Math.round(Number.isFinite(Number(options.x)) ? Number(options.x) : 0)
   const dy = Math.round(Number.isFinite(Number(options.y)) ? Number(options.y) : 0)
-  if (s === 1 && dx === 0 && dy === 0) return null
+  const scaleExpr = options.scaleExpr || null
+  const xExpr = options.xExpr || null
+  const yExpr = options.yExpr || null
+  const isAnimated = Boolean(scaleExpr || xExpr || yExpr)
+
+  if (!isAnimated && s === 1 && dx === 0 && dy === 0) return null
+
+  const fps = Number(options.fps) > 0 ? Number(options.fps) : 30
+  const duration = Math.max(0.05, Number(options.duration) || 1)
+  const bgColor = options.bgColor || 'black'
+  const bg = `color=c=${bgColor}:s=${canvasW}x${canvasH}:r=${fps}:d=${(duration + 2).toFixed(3)}`
+
+  if (isAnimated) {
+    const tail = scaleExpr
+      ? `scale=w='trunc(${canvasW}*(${scaleExpr})/100/2)*2':h='trunc(${canvasH}*(${scaleExpr})/100/2)*2':eval=frame`
+      : `scale=${Math.max(2, Math.round(canvasW * s / 2) * 2)}:${Math.max(2, Math.round(canvasH * s / 2) * 2)}`
+    const ovX = xExpr ? `(W-w)/2+(${xExpr})` : `(W-w)/2+${dx}`
+    const ovY = yExpr ? `(H-h)/2+(${yExpr})` : `(H-h)/2+${dy}`
+    const overlay = `overlay=x='${ovX}':y='${ovY}':eval=frame:shortest=1`
+    return { bg, tail, overlay }
+  }
 
   const w = Math.max(2, Math.round(canvasW * s / 2) * 2)
   const h = Math.max(2, Math.round(canvasH * s / 2) * 2)
   const x = Math.round((canvasW - w) / 2 + dx)
   const y = Math.round((canvasH - h) / 2 + dy)
-  const fps = Number(options.fps) > 0 ? Number(options.fps) : 30
-  const duration = Math.max(0.05, Number(options.duration) || 1)
-  const bgColor = options.bgColor || 'black'
   return {
-    bg: `color=c=${bgColor}:s=${canvasW}x${canvasH}:r=${fps}:d=${(duration + 2).toFixed(3)}`,
+    bg,
     tail: `scale=${w}:${h}`,
     overlay: `overlay=x=${x}:y=${y}:shortest=1`
   }
