@@ -210,4 +210,150 @@ describe('v1compat', () => {
     assert.equal(stats.removed, 1)
     assert.deepEqual(tracks.map(track => track.id), ['t-audio-1', 't-video-2'])
   })
+
+  it('carries text animation in/out across the bridge (C-5)', () => {
+    const textClip = {
+      ...v1Clip({ id: 'c-text-1' }),
+      text: 'Title',
+      animIn: 'slide-up',
+      animInDuration: 0.6,
+      animOut: 'fade',
+      animOutDuration: 0.4
+    }
+    const v3 = v1ClipToV3(textClip, 'text')
+    assert.equal(v3.animIn, 'slide-up')
+    assert.equal(v3.animInDuration, 0.6)
+    assert.equal(v3.animOut, 'fade')
+    assert.equal(v3.animOutDuration, 0.4)
+
+    const v1Back = v3ClipToV1(v3)
+    assert.equal(v1Back.animIn, 'slide-up')
+    assert.equal(v1Back.animInDuration, 0.6)
+    assert.equal(v1Back.animOut, 'fade')
+    assert.equal(v1Back.animOutDuration, 0.4)
+  })
+
+  it('carries video stabilize configuration across the bridge (E-5)', () => {
+    const videoClip = {
+      ...v1Clip({ id: 'c-video-1' }),
+      stabilize: true,
+      stabilizeLevel: 'aggressive',
+      stabilizedPath: 'D:/cache/stabilized/vid-abc.mp4',
+      stabilizeStatus: 'ready'
+    }
+    const v3 = v1ClipToV3(videoClip, 'video')
+    assert.equal(v3.stabilize, true)
+    assert.equal(v3.stabilizeLevel, 'aggressive')
+    assert.equal(v3.stabilizedPath, 'D:/cache/stabilized/vid-abc.mp4')
+    assert.equal(v3.stabilizeStatus, 'ready')
+
+    const v1Back = v3ClipToV1(v3)
+    assert.equal(v1Back.stabilize, true)
+    assert.equal(v1Back.stabilizeLevel, 'aggressive')
+    assert.equal(v1Back.stabilizedPath, 'D:/cache/stabilized/vid-abc.mp4')
+    assert.equal(v1Back.stabilizeStatus, 'ready')
+  })
+
+  it('detects cropRect changes and syncs across the bridge (F-3)', () => {
+    const videoClip = {
+      ...v1Clip({ id: 'c-video-1' }),
+      fit: 'crop',
+      cropRect: { x: 0.1, y: 0.15, w: 0.8, h: 0.7 }
+    }
+    const v3 = v1ClipToV3(videoClip, 'video')
+    assert.deepEqual(v3.cropRect, { x: 0.1, y: 0.15, w: 0.8, h: 0.7 })
+
+    const v1Back = v3ClipToV1(v3)
+    assert.deepEqual(v1Back.cropRect, { x: 0.1, y: 0.15, w: 0.8, h: 0.7 })
+
+    assert.ok(v1MatchesV3(videoClip, v3))
+
+    const v3Edited = { ...v3, cropRect: { x: 0.2, y: 0.2, w: 0.6, h: 0.6 } }
+    assert.ok(!v1MatchesV3(videoClip, v3Edited))
+  })
+
+  it('syncs reverse-only changes across the bridge (R74)', () => {
+    const tracks = [{ id: 't-video-1', type: 'video', name: 'V', items: [v1Clip({ id: 'c-rev-1', reverse: true })] }]
+    const v3 = v1TracksToV3(tracks)
+    const clip = v3.tracks[0].items[0]
+    assert.equal(clip.reverse, true)
+    assert.ok(v1MatchesV3(tracks[0].items[0], clip))
+
+    // A reverse toggle made in v3 must sync back — previously silently
+    // dropped because `reverse` was excluded from COMPARE_FLAGS (R74).
+    const toggledClip = { ...clip, reverse: false }
+    assert.equal(v1MatchesV3(tracks[0].items[0], toggledClip), false)
+    const stats = syncV3Result(tracks, { version: 3, tracks: [{ ...v3.tracks[0], items: [toggledClip] }], markers: [] })
+    assert.deepEqual(stats, { added: 0, updated: 1, removed: 0 })
+    assert.equal(tracks[0].items[0].reverse, false)
+  })
+
+  it('syncs effects-only changes across the bridge (R74)', () => {
+    const tracks = [{
+      id: 't-video-1', type: 'video', name: 'V',
+      items: [v1Clip({ id: 'c-eff-1', effects: [{ type: 'blur', params: { amount: 5 } }] })]
+    }]
+    const v3 = v1TracksToV3(tracks)
+    const clip = v3.tracks[0].items[0]
+    assert.equal(clip.effects.length, 1)
+    assert.ok(v1MatchesV3(tracks[0].items[0], clip))
+
+    // An effects-only edit must sync back — previously silently dropped
+    // because `effects` was not compared at all (R74).
+    const editedClip = {
+      ...clip,
+      effects: [
+        { type: 'blur', params: { amount: 5 } },
+        { type: 'vignette', params: { intensity: 0.3 } }
+      ]
+    }
+    assert.equal(v1MatchesV3(tracks[0].items[0], editedClip), false)
+    const stats = syncV3Result(tracks, { version: 3, tracks: [{ ...v3.tracks[0], items: [editedClip] }], markers: [] })
+    assert.deepEqual(stats, { added: 0, updated: 1, removed: 0 })
+    assert.equal(tracks[0].items[0].effects.length, 2)
+    assert.equal(tracks[0].items[0].effects[1].type, 'vignette')
+  })
+
+  it('syncs keyframe-only changes across the bridge (R74)', () => {
+    const tracks = [{
+      id: 't-video-1', type: 'video', name: 'V',
+      items: [v1Clip({ id: 'c-kf-1', keyframes: [{ t: secToTicks(1), prop: 'scale', value: 1.5 }] })]
+    }]
+    const v3 = v1TracksToV3(tracks)
+    const clip = v3.tracks[0].items[0]
+    assert.equal(clip.keyframes.length, 1)
+    assert.ok(v1MatchesV3(tracks[0].items[0], clip))
+
+    // A keyframe-only edit must sync back — previously silently dropped
+    // because `keyframes` was not compared at all (R74).
+    const editedClip = {
+      ...clip,
+      keyframes: [
+        { t: secToTicks(1), prop: 'scale', value: 1.5 },
+        { t: secToTicks(3), prop: 'opacity', value: 0.5 }
+      ]
+    }
+    assert.equal(v1MatchesV3(tracks[0].items[0], editedClip), false)
+    const stats = syncV3Result(tracks, { version: 3, tracks: [{ ...v3.tracks[0], items: [editedClip] }], markers: [] })
+    assert.deepEqual(stats, { added: 0, updated: 1, removed: 0 })
+    assert.equal(tracks[0].items[0].keyframes.length, 2)
+    assert.equal(tracks[0].items[0].keyframes[1].prop, 'opacity')
+  })
+
+  it('syncs track-level muted/locked/hidden across the bridge (R74)', () => {
+    const tracks = [
+      { id: 't-video-1', type: 'video', name: 'V', items: [v1Clip()] },
+      { id: 't-audio-1', type: 'audio', name: 'A', items: [], muted: true, locked: false, hidden: false }
+    ]
+    const v3 = v1TracksToV3(tracks)
+    // Mute the audio track in v3 — must sync back to v1 (R74).
+    v3.tracks[1].muted = false
+    v3.tracks[1].locked = true
+    v3.tracks[1].hidden = true
+    const stats = syncV3Result(tracks, v3)
+    assert.deepEqual(stats, { added: 0, updated: 0, removed: 0 })
+    assert.equal(tracks[1].muted, false)
+    assert.equal(tracks[1].locked, true)
+    assert.equal(tracks[1].hidden, true)
+  })
 })

@@ -67,7 +67,15 @@ export function v1ClipToV3(item, trackType) {
     effects: Array.isArray(item.effects) ? item.effects : [],
     keyframes: Array.isArray(item.keyframes) ? item.keyframes : [],
     transitionIn: item.transitionIn,
-    fade: item.fade
+    fade: item.fade,
+    animIn: item.animIn,
+    animInDuration: item.animInDuration,
+    animOut: item.animOut,
+    animOutDuration: item.animOutDuration,
+    stabilize: item.stabilize,
+    stabilizeLevel: item.stabilizeLevel,
+    stabilizedPath: item.stabilizedPath,
+    stabilizeStatus: item.stabilizeStatus
   }
 }
 
@@ -123,25 +131,65 @@ export function v3ClipToV1(clip) {
     keyframes: clip.keyframes ?? [],
     transitionIn: clip.transitionIn,
     fade: clip.fade,
+    animIn: clip.animIn,
+    animInDuration: clip.animInDuration,
+    animOut: clip.animOut,
+    animOutDuration: clip.animOutDuration,
+    stabilize: clip.stabilize,
+    stabilizeLevel: clip.stabilizeLevel,
+    stabilizedPath: clip.stabilizedPath,
+    stabilizeStatus: clip.stabilizeStatus,
     groupId: clip.groupId ?? null,
     linkId: clip.linkId ?? null
   }
   return patch
 }
 
-const COMPARE_NUMBERS = ['in', 'out', 'offset', 'speed', 'opacity', 'scale', 'x', 'y', 'rotation', 'volume', 'fontSize', 'focusX', 'focusY']
+const COMPARE_NUMBERS = ['in', 'out', 'offset', 'speed', 'opacity', 'scale', 'x', 'y', 'rotation', 'volume', 'fontSize', 'focusX', 'focusY', 'animInDuration', 'animOutDuration']
 // groupId/linkId must be compared or relation-only core edits (C9
-// grouping) get silently dropped by syncV3Result. `reverse` stays out:
-// v1 items often lack the field (undefined) while v3 normalizes it to
-// false, so a strict compare would flag every untouched clip.
+// grouping) get silently dropped by syncV3Result.
 // fontFamily/fontFile (C-1) must be compared so a font-only edit syncs
 // back AND split/paste/duplicate clones (which copy the v3 clip verbatim)
 // keep the picked face on their new v1 items.
-const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit', 'groupId', 'linkId', 'fontFamily', 'fontFile', 'align']
+const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit', 'groupId', 'linkId', 'fontFamily', 'fontFile', 'align', 'animIn', 'animOut', 'stabilizeLevel', 'stabilizedPath', 'stabilizeStatus']
 // Text style flags (C-2): undefined and false compare EQUAL — v1 items
 // from older projects lack the keys, so a strict compare would rewrite
-// every untouched clip on open.
-const COMPARE_FLAGS = ['bold', 'italic', 'shadow', 'stroke']
+// every untouched clip on open. `reverse` is here too: v1 items often
+// lack it (undefined) while v3 normalizes to false, so treat undefined
+// as false — a real reverse toggle must sync back (R74).
+const COMPARE_FLAGS = ['bold', 'italic', 'shadow', 'stroke', 'stabilize', 'reverse']
+
+// Deep-compare effect arrays so an effects-only edit syncs back (R74).
+function sameEffects(a, b) {
+  const arrA = Array.isArray(a) ? a : []
+  const arrB = Array.isArray(b) ? b : []
+  if (arrA.length !== arrB.length) return false
+  for (let i = 0; i < arrA.length; i++) {
+    if (arrA[i].type !== arrB[i].type) return false
+    const pa = arrA[i].params || {}
+    const pb = arrB[i].params || {}
+    const keysA = Object.keys(pa).sort()
+    const keysB = Object.keys(pb).sort()
+    if (keysA.length !== keysB.length) return false
+    for (const k of keysA) {
+      if (!sameValue(pa[k], pb[k])) return false
+    }
+  }
+  return true
+}
+
+// Deep-compare keyframe arrays so a keyframe-only edit syncs back (R74).
+function sameKeyframes(a, b) {
+  const arrA = Array.isArray(a) ? a : []
+  const arrB = Array.isArray(b) ? b : []
+  if (arrA.length !== arrB.length) return false
+  for (let i = 0; i < arrA.length; i++) {
+    if (!sameValue(arrA[i].t, arrB[i].t)) return false
+    if (arrA[i].prop !== arrB[i].prop) return false
+    if (!sameValue(arrA[i].value, arrB[i].value)) return false
+  }
+  return true
+}
 
 function sameValue(a, b) {
   if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= EPS
@@ -169,6 +217,15 @@ function sameFade(a, b) {
   return sameValue(aIn, bIn) && sameValue(aOut, bOut)
 }
 
+function sameCropRect(a, b) {
+  if (a == null && b == null) return true
+  if (a == null || b == null) return false
+  return sameValue(num(a.x, 0), num(b.x, 0))
+    && sameValue(num(a.y, 0), num(b.y, 0))
+    && sameValue(num(a.w, 1), num(b.w, 1))
+    && sameValue(num(a.h, 1), num(b.h, 1))
+}
+
 /** True when a v1 item already matches a v3 clip (untouched clips skip). */
 export function v1MatchesV3(item, clip) {
   const patch = v3ClipToV1(clip)
@@ -188,6 +245,12 @@ export function v1MatchesV3(item, clip) {
   // fade { in, out } in TICKS: a fade the user clears must sync back
   // even when no numeric field changed (R38/C12).
   if (!sameFade(item.fade, patch.fade)) return false
+  // cropRect { x, y, w, h }: compared explicitly so crop adjustments sync back (R67/F-3).
+  if (!sameCropRect(item.cropRect, patch.cropRect)) return false
+  // effects[]: deep-compared so an effects-only edit syncs back (R74).
+  if (!sameEffects(item.effects, patch.effects)) return false
+  // keyframes[]: deep-compared so a keyframe-only edit syncs back (R74).
+  if (!sameKeyframes(item.keyframes, patch.keyframes)) return false
   return true
 }
 
@@ -213,6 +276,16 @@ export function syncV3Result(v1Tracks, afterV3) {
     if (!v1Track) {
       v1Track = { id: v3Track.id, type: v3Track.type, name: v3Track.name ?? v3Track.type, items: [] }
       v1Tracks.push(v1Track)
+    }
+    // Sync track-level flags (muted/locked/hidden) from v3 so a track
+    // toggle survives the live round-trip (R74). v1 items often lack
+    // these keys, so treat undefined as false.
+    const trackPatch = {}
+    if (v3Track.muted !== undefined) trackPatch.muted = !!v3Track.muted
+    if (v3Track.locked !== undefined) trackPatch.locked = !!v3Track.locked
+    if (v3Track.hidden !== undefined) trackPatch.hidden = !!v3Track.hidden
+    if (Object.keys(trackPatch).length > 0) {
+      Object.assign(v1Track, trackPatch)
     }
     for (const clip of v3Track.items ?? []) {
       v3Ids.add(clip.id)

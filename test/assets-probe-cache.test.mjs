@@ -116,7 +116,13 @@ describe('cache', () => {
     assert.ok(args.includes('-i'))
     assert.ok(args.includes('in.mp4'))
     assert.ok(args.includes('scale=960:-2'))
+    assert.ok(args.includes('libx264'))
+    assert.ok(args.includes('aac'))
     assert.ok(args.includes('out.mp4'))
     assert.ok(buildProxyArgs('in.mp4', 'out.mp4', 480).includes('scale=480:-2'))
+
+    const custom = buildProxyArgs('in.mov', 'out.mp4', { width: 720, crf: 26, fps: 30 })
+    assert.ok(custom.includes('scale=720:-2,fps=30'))
+    assert.ok(custom.includes('26'))
   })
 })

@@ -117,12 +117,36 @@ export interface TmcutTimelineClip {
   align?: 'left' | 'center' | 'right'
   shadow?: boolean
   stroke?: boolean
+  /** Text animation in (intro) and out (outro) (Roadmap C-5). */
+  animIn?: TmcutTextAnimationType
+  animInDuration?: number
+  animOut?: TmcutTextAnimationType
+  animOutDuration?: number
+  /** Video stabilization (Roadmap E-5). */
+  stabilize?: boolean
+  stabilizeLevel?: TmcutStabilizeLevel
+  stabilizedPath?: string | null
+  stabilizeStatus?: TmcutStabilizeStatus
   effects: TmcutClipEffect[]
   keyframes: TmcutKeyframe[]
   transitionIn?: TmcutTransition
   /** Fade in/out audio envelope, in TICKS (Roadmap C12). */
   fade?: { in: MediaTime, out: MediaTime }
 }
+
+export type TmcutTextAnimationType
+  = | 'none'
+    | 'fade'
+    | 'slide-up'
+    | 'slide-down'
+    | 'slide-left'
+    | 'slide-right'
+    | 'zoom-in'
+    | 'zoom-out'
+
+export type TmcutStabilizeLevel = 'mild' | 'medium' | 'aggressive'
+
+export type TmcutStabilizeStatus = 'none' | 'processing' | 'ready' | 'error'
 
 export interface TmcutTrack {
   id: string
@@ -146,6 +170,54 @@ export interface TmcutTimeline {
   version: 3
   tracks: TmcutTrack[]
   markers: TmcutMarker[]
+}
+
+export interface TmcutMediaFolder {
+  id: string
+  name: string
+  color?: string
+  projectId?: string | null
+  createdAt?: number | string
+}
+
+export type TmcutTemplateCategory
+  = | 'intro'
+    | 'outro'
+    | 'split-screen'
+    | 'social'
+    | 'promo'
+    | 'minimal'
+    | 'custom'
+
+export interface TmcutTemplatePlaceholder {
+  id: string
+  type: 'video' | 'image' | 'audio' | 'text'
+  label: string
+  clipId: string
+  trackId?: string
+  defaultContent?: string
+  required?: boolean
+}
+
+export interface TmcutTemplate {
+  id: string
+  name: string
+  description?: string
+  category: TmcutTemplateCategory
+  aspectRatio: '9:16' | '16:9' | '1:1'
+  canvas: {
+    width: number
+    height: number
+    fps: number
+  }
+  durationTicks: MediaTime
+  tracks: TmcutTrack[]
+  markers?: TmcutMarker[]
+  placeholders: TmcutTemplatePlaceholder[]
+  thumbnail?: string
+  author?: string
+  createdAt?: number
+  isBuiltin?: boolean
 }
 
 export interface TmcutProject {

@@ -11,6 +11,16 @@ export interface TmcutEdlSegment {
   reason: string
   /** optional representative timestamp, seconds */
   thumb?: number
+  /** optional transcript text overlapping this segment */
+  transcriptText?: string
+  /** true if filler words were detected and penalized in this segment */
+  hasFillerWords?: boolean
+  /** list of detected filler words */
+  detectedFillers?: string[]
+  /** true if segment matched priority keywords */
+  isHighlight?: boolean
+  /** list of matched priority keywords */
+  matchedKeywords?: string[]
 }
 
 export type TmcutAutocutProfile = 'viral-shorts' | 'podcast-summary' | 'cinematic-vlog'

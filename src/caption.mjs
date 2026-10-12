@@ -49,7 +49,6 @@ export function splitLongCue(cue, maxChars) {
     if (current.length > 0 && nextLen > maxChars) {
       chunks.push(current.join(' '))
       current = []
-      currentLen = 0
     }
     if (current.length === 0) {
       current = [word]

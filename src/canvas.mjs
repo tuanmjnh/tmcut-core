@@ -8,6 +8,92 @@
 
 import { fpsToRational } from './time.mjs'
 
+/**
+ * Convert a DSL canvas color to an FFmpeg `color` source spec.
+ * FFmpeg color syntax is `[0x|#]RRGGBB[AA]` — the render pipeline's proven
+ * working form is `0x` hex (see app render helper ffmpegColor and the R62
+ * render test asserting `color=c=0x123456`). Named colors ('black', 'red')
+ * pass through unchanged.
+ */
+function toFfmpegColor(value) {
+  const v = typeof value === 'string' ? value.trim() : ''
+  if (!v) return '0x000000'
+  if (v.startsWith('#')) return `0x${v.slice(1)}`
+  if (v.startsWith('0x')) return v
+  return v
+}
+
+/**
+ * Builds the FFmpeg background source descriptor for the canvas.
+ *
+ * Contract (R76 — Phase 4 Canvas Engine):
+ * - `color` / `transparent` → `{ kind: 'source', chain }` — a self-contained
+ *   `color=` source filter chain; append your own stream label.
+ *   Transparent is a REAL chain (`0x00000000`) so overlays still composite
+ *   over it; the output codec (alpha-capable) decides whether the alpha
+ *   survives to the file.
+ * - `image` → `{ kind: 'input', file, inputFlags, tail }` — the image is an
+ *   FFmpeg INPUT (not a `movie=` filter: drive-letter colons like `D:/`
+ *   break `:`-separated filter options, and `fps=` is not a movie demuxer
+ *   option). The caller registers the file via
+ *   `graph.addInput(file, inputFlags)` (flags carry `-framerate`,
+ *   `-loop 1`, `-t <duration>`) and applies `tail` to the labeled stream.
+ *
+ * @param {object} options
+ * @param {number} options.canvasW    Canvas width (evened).
+ * @param {number} options.canvasH    Canvas height (evened).
+ * @param {number} options.fps        Frame rate.
+ * @param {number} options.duration   Seconds the background must cover.
+ * @param {object} options.background { type: 'color'|'image'|'transparent', value?: string }.
+ * @returns {object} { type, kind, chain?, file?, inputFlags?, tail? }
+ */
+export function buildBackgroundSource(options) {
+  const canvasW = Math.max(2, Math.floor((Number(options.canvasW) || 0) / 2) * 2)
+  const canvasH = Math.max(2, Math.floor((Number(options.canvasH) || 0) / 2) * 2)
+  const fps = Number(options.fps) > 0 ? Number(options.fps) : 30
+  const duration = Math.max(0.05, Number(options.duration) || 1)
+  const bg = options.background ?? { type: 'color', value: '#000000' }
+
+  if (bg.type === 'image') {
+    const imgPath = typeof bg.value === 'string' ? bg.value.trim() : ''
+    if (!imgPath) {
+      // Missing path: fall back to a solid black source so the render
+      // still produces a full-canvas frame (no dangling input).
+      return {
+        type: 'color',
+        kind: 'source',
+        chain: `color=c=0x000000:s=${canvasW}x${canvasH}:r=${fps}:d=${duration.toFixed(3)}`
+      }
+    }
+    // Cover-fit: scale to fill the canvas, crop the overflow, keep SAR 1.
+    // No `-t` here: each consumer trims its own window (clip duration +
+    // headroom), so one looping input can serve the whole timeline.
+    const tail = `scale=${canvasW}:${canvasH}:force_original_aspect_ratio=increase,crop=${canvasW}:${canvasH},setsar=1`
+    return {
+      type: 'image',
+      kind: 'input',
+      file: imgPath,
+      inputFlags: ['-framerate', String(fps), '-loop', '1'],
+      tail
+    }
+  }
+
+  if (bg.type === 'transparent') {
+    return {
+      type: 'transparent',
+      kind: 'source',
+      chain: `color=c=0x00000000:s=${canvasW}x${canvasH}:r=${fps}:d=${duration.toFixed(3)}`
+    }
+  }
+
+  // 'color' (default)
+  return {
+    type: 'color',
+    kind: 'source',
+    chain: `color=c=${toFfmpegColor(bg.value)}:s=${canvasW}x${canvasH}:r=${fps}:d=${duration.toFixed(3)}`
+  }
+}
+
 export const TMUTCANVAS_PRESETS = [
   { id: '16:9', width: 1920, height: 1080, orientation: 'landscape', icon: 'i-lucide-tv' },
   { id: '9:16', width: 1080, height: 1920, orientation: 'portrait', icon: 'i-lucide-smartphone' },
@@ -185,6 +271,14 @@ function withRotation(filters, options = {}) {
  * frame quantization from `trim` so the segment always ends on the
  * clip's own last frame and concat A/V lengths stay aligned.
  *
+ * Phase 4 (R76): `bgInput` lets the caller supply a pre-labeled background
+ * stream (e.g. `[v_bg]` from the canvas image source). The overlay then
+ * composites the clip over that shared base instead of an inline `color=`
+ * source — required when the canvas background is an image, where the
+ * still must be a looping INPUT (drive-letter colons cannot appear in a
+ * `movie=` filter). When set, `bg` is an empty string and the overlay
+ * reads the background from the supplied label.
+ *
  * @param {object} [options]
  * @param {number} options.canvasW     Canvas width (evenized like fit filters).
  * @param {number} options.canvasH     Canvas height.
@@ -218,7 +312,9 @@ export function buildFfmpegTransform(options = {}) {
   const fps = Number(options.fps) > 0 ? Number(options.fps) : 30
   const duration = Math.max(0.05, Number(options.duration) || 1)
   const bgColor = options.bgColor || 'black'
-  const bg = `color=c=${bgColor}:s=${canvasW}x${canvasH}:r=${fps}:d=${(duration + 2).toFixed(3)}`
+  const bg = options.bgInput
+    ? '' // caller supplies the background via a labeled input (image background)
+    : `color=c=${bgColor}:s=${canvasW}x${canvasH}:r=${fps}:d=${(duration + 2).toFixed(3)}`
 
   if (isAnimated) {
     const tail = scaleExpr
@@ -303,3 +399,82 @@ export const SAFE_AREA_PRESETS = [
   { id: '3-4', label: '3:4', ratio: 3 / 4 },
   { id: '21-9', label: '21:9', ratio: 21 / 9 }
 ]
+
+/**
+ * Interactive crop ratio presets for canvas crop editing (Roadmap F-3).
+ * `ratio = width / height` in pixel terms.
+ */
+export const CROP_RATIO_PRESETS = [
+  { id: 'free', label: 'Free', ratio: null },
+  { id: '16-9', label: '16:9', ratio: 16 / 9 },
+  { id: '9-16', label: '9:16', ratio: 9 / 16 },
+  { id: '1-1', label: '1:1', ratio: 1 },
+  { id: '4-3', label: '4:3', ratio: 4 / 3 },
+  { id: '3-4', label: '3:4', ratio: 3 / 4 },
+  { id: '21-9', label: '21:9', ratio: 21 / 9 }
+]
+
+/**
+ * Clamps a normalized cropRect { x, y, w, h } inside [0, 1] bounds with min size.
+ */
+export function clampCropRect(rect, minSize = 0.05) {
+  if (!rect || typeof rect !== 'object') {
+    return { x: 0, y: 0, w: 1, h: 1 }
+  }
+  const minS = Math.max(0.01, Math.min(1, minSize))
+  const rawW = Number.isFinite(rect.w) ? rect.w : 1
+  const rawH = Number.isFinite(rect.h) ? rect.h : 1
+  const w = Math.min(1, Math.max(minS, rawW))
+  const h = Math.min(1, Math.max(minS, rawH))
+  const rawX = Number.isFinite(rect.x) ? rect.x : 0
+  const rawY = Number.isFinite(rect.y) ? rect.y : 0
+  const x = Math.max(0, Math.min(1 - w, rawX))
+  const y = Math.max(0, Math.min(1 - h, rawY))
+  return {
+    x: Math.round(x * 10000) / 10000,
+    y: Math.round(y * 10000) / 10000,
+    w: Math.round(w * 10000) / 10000,
+    h: Math.round(h * 10000) / 10000
+  }
+}
+
+/**
+ * Fits a target pixel aspect ratio inside the existing cropRect or [0, 1] space,
+ * centered around the existing crop center.
+ */
+export function applyCropRatio(rect, ratio, sourceW = 1920, sourceH = 1080) {
+  const current = clampCropRect(rect)
+  if (!ratio || ratio <= 0 || !Number.isFinite(ratio)) {
+    return current
+  }
+  const sw = Math.max(1, Number.isFinite(sourceW) && sourceW > 0 ? sourceW : 1920)
+  const sh = Math.max(1, Number.isFinite(sourceH) && sourceH > 0 ? sourceH : 1080)
+  const sourceAspect = sw / sh
+  // In normalized 0..1 space: normRatio = w_norm / h_norm = ratio / sourceAspect
+  const targetNormRatio = ratio / sourceAspect
+
+  let newW = current.w
+  let newH = current.h
+
+  if (newW / newH > targetNormRatio) {
+    newW = newH * targetNormRatio
+  } else {
+    newH = newW / targetNormRatio
+  }
+
+  if (newW > 1) {
+    newW = 1
+    newH = 1 / targetNormRatio
+  }
+  if (newH > 1) {
+    newH = 1
+    newW = targetNormRatio
+  }
+
+  const cx = current.x + current.w / 2
+  const cy = current.y + current.h / 2
+  const newX = cx - newW / 2
+  const newY = cy - newH / 2
+
+  return clampCropRect({ x: newX, y: newY, w: newW, h: newH })
+}

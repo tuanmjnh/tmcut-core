@@ -13,10 +13,13 @@ import type {
   TmcutProject,
   TmcutCanvas,
   TmcutFitMode,
-  TmcutOrientation
+  TmcutOrientation,
+  TmcutCropRect,
+  MediaTime
 } from '../types/dsl.js'
 import type { TmcutAssetKind, TmcutMediaMetadata } from '../types/media.js'
 import type { TmcutEdl, TmcutEdlSegment } from '../types/edl.js'
+import type { TranscriptCue } from '../types/caption.js'
 
 // Re-exported domain types for consumers (single import site).
 export type {
@@ -30,7 +33,9 @@ export type {
   TmcutProject,
   TmcutCanvas,
   TmcutFitMode,
-  TmcutOrientation
+  TmcutOrientation,
+  TmcutCropRect,
+  MediaTime
 } from '../types/dsl.js'
 export type { TmcutAssetKind } from '../types/media.js'
 export type { TmcutEdl, TmcutEdlSegment } from '../types/edl.js'
@@ -185,6 +190,17 @@ export function decideRecovery(input: CoreRecoveryInput): CoreRecoveryDecision
 export function int16ToPeaks(samples: ArrayLike<number> | null | undefined, buckets?: number): number[]
 export function clampWaveformPoints(points: unknown): number[]
 
+export function fnv1aHex(text: string): string
+export function cacheKeyForPath(path: string, revision?: { mtimeMs?: number, size?: number }): string
+export function cachePathFor(cacheDir: string, kind: string, key: string, extension: string): string
+
+export interface ProxyOptions {
+  width?: number
+  crf?: number
+  fps?: number
+}
+export function buildProxyArgs(input: string, output: string, options?: number | ProxyOptions): string[]
+
 export function validateEdl(edl: unknown): string[]
 export function selectSegments(edl: TmcutEdl, minScore?: number): TmcutEdlSegment[]
 /** EDL segments (seconds) -> tick clip inputs; an invalid EDL yields []. */
@@ -289,11 +305,6 @@ export function listAssets(registry: CoreAssetRecord[], kind?: CoreAssetKind): C
 export function parseFrameRate(raw: unknown): number
 export function normalizeProbe(payload: unknown): TmcutMediaMetadata | null
 
-export function fnv1aHex(text: unknown): string
-export function cacheKeyForPath(path: unknown, revision?: { mtimeMs?: number, size?: number }): string
-export function cachePathFor(cacheDir: string, kind: string, key: unknown, extension: string): string
-export function buildProxyArgs(input: string, output: string, width?: number): string[]
-
 export function v1ClipToV3(item: CoreV1TrackItem, trackType: CoreTrackType): TmcutTimelineClip
 export function v1TracksToV3(tracks: CoreV1Track[]): TmcutTimeline
 export function v3ClipToV1(clip: TmcutTimelineClip): CoreV1TrackItem
@@ -303,13 +314,43 @@ export function syncV3Result(v1Tracks: CoreV1Track[], afterV3: TmcutTimeline): C
 export function parseSceneOutput(stderrText: unknown, durationSec: number): CoreSceneSegment[]
 export function parseSilenceOutput(stderrText: unknown, durationSec: number): CoreSilenceRange[]
 export function overlapDuration(start: number, end: number, ranges?: Array<{ start: number, end: number }>): number
+export interface CoreTranscriptItem {
+  start: number
+  end: number
+  text?: string
+}
+
+export const DEFAULT_FILLER_WORDS: string[]
+
+export function detectFillerWords(text: unknown, options?: { customWords?: string[] }): {
+  count: number
+  words: string[]
+  fillerRatio: number
+}
+
+export function analyzeTranscriptSegment(text: unknown, options?: {
+  filterFillerWords?: boolean
+  keywords?: string[]
+  customFillerWords?: string[]
+}): {
+  isFiller: boolean
+  isHighlight: boolean
+  scoreModifier: number
+  matchedKeywords: string[]
+  detectedFillers: string[]
+}
+
 export function scoreSegments(input: {
   scenes?: CoreSceneSegment[]
   silences?: CoreSilenceRange[]
   speech?: CoreSpeechRange[]
+  transcript?: CoreTranscriptItem[]
   profile?: string
   assetId?: string
   analyzerVersion?: string
+  filterFillerWords?: boolean
+  keywords?: string[]
+  customFillerWords?: string[]
 }): TmcutEdl
 
 export interface TmcutCanvasPresetDef {
@@ -361,6 +402,8 @@ export function buildFfmpegTransform(options?: {
   fps?: number
   duration?: number
   bgColor?: string
+  /** Phase 4: pre-labeled background stream (e.g. `[v_bg]`) used instead of the inline `color=` source — for image backgrounds. */
+  bgInput?: string
 }): TmcutFfmpegTransform | null
 export function reframeTransform(x: number, y: number, fromW: number, fromH: number, toW: number, toH: number): { x: number, y: number }
 export function previewScale(containerWidth: number, canvasWidth: number): number
@@ -379,8 +422,46 @@ export function safeAreaRects(canvas: { width?: number, height?: number } | null
 }
 export const SAFE_AREA_PRESETS: Array<{ id: string, label: string, ratio: number }>
 
+// --- Canvas Crop & Mask (Roadmap F-3) ---
+export interface TmcutCropRatioPreset {
+  id: string
+  label: string
+  ratio: number | null
+}
+export const CROP_RATIO_PRESETS: TmcutCropRatioPreset[]
+export function clampCropRect(rect: unknown, minSize?: number): TmcutCropRect
+export function applyCropRatio(rect: unknown, ratio: number | null | undefined, sourceW?: number, sourceH?: number): TmcutCropRect
+
+// --- Canvas Background (Phase 4) ---
+export interface TmcutBackgroundOptions {
+  canvasW: number
+  canvasH: number
+  fps: number
+  duration: number
+  background: { type: 'color' | 'image' | 'transparent', value?: string }
+}
+/** Self-contained `color=` source chain; append your own stream label. */
+export interface TmcutBackgroundSourceDescriptor {
+  type: 'color' | 'transparent'
+  kind: 'source'
+  chain: string
+}
+/** Image background: an FFmpeg INPUT (`-framerate <fps> -loop 1 -t <d> -i file`); apply `tail` to the labeled stream. */
+export interface TmcutBackgroundImageDescriptor {
+  type: 'image'
+  kind: 'input'
+  file: string
+  inputFlags: string[]
+  tail: string
+}
+export type TmcutBackgroundDescriptor = TmcutBackgroundSourceDescriptor | TmcutBackgroundImageDescriptor
+export function buildBackgroundSource(options: TmcutBackgroundOptions): TmcutBackgroundDescriptor
+
 // --- Keyframes (Roadmap C3) ---
 export type TmcutKeyframeEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step'
+
+/** All supported keyframe easings (Roadmap C3). */
+export const KEYFRAME_EASINGS: TmcutKeyframeEasing[]
 
 export interface TmcutKeyframe {
   /** Timeline ticks (TICKS_PER_SECOND =120000). */
@@ -463,3 +544,110 @@ export interface TmcutEffectDescriptor {
 export const EFFECT_REGISTRY: Record<string, TmcutEffectDescriptor>
 export function validateEffect(effect: unknown): string[]
 export function normalizeEffects(list: unknown): TmcutClipEffect[]
+export function buildFfmpegEffectFilters(effects: unknown): string[]
+
+export interface StabilizeOptions {
+  level?: TmcutStabilizeLevel
+  smoothing?: number
+  shakiness?: number
+  accuracy?: number
+  stepsize?: number
+  zoom?: number
+  optalgo?: string
+}
+export const STABILIZE_PRESETS: Record<TmcutStabilizeLevel, Required<Omit<StabilizeOptions, 'level'>>>
+export function escapeFilterPath(filePath: string): string
+export function resolveStabilizeOptions(options?: TmcutStabilizeLevel | StabilizeOptions): Required<StabilizeOptions>
+export function buildVidstabDetectArgs(input: string, trfPath: string, options?: TmcutStabilizeLevel | StabilizeOptions): string[]
+export function buildVidstabTransformArgs(input: string, trfPath: string, output: string, options?: TmcutStabilizeLevel | StabilizeOptions): string[]
+
+export interface TmcutMediaFolder {
+  id: string
+  name: string
+  color?: string
+  projectId?: string | null
+  createdAt?: number | string
+}
+
+export interface TmcutFolderCounts {
+  total: number
+  unassigned: number
+  [key: string]: number
+}
+
+export const FOLDER_TAG_COLORS: string[]
+export function createFolder(folders: TmcutMediaFolder[], input?: Partial<TmcutMediaFolder>): TmcutMediaFolder
+export function renameFolder(folders: TmcutMediaFolder[], folderId: string, newName: string): boolean
+export function updateFolderColor(folders: TmcutMediaFolder[], folderId: string, color: string): boolean
+export function removeFolder(folders: TmcutMediaFolder[], folderId: string): boolean
+export function getFolder(folders: TmcutMediaFolder[], folderId: string): TmcutMediaFolder | null
+export function setAssetFolder<T extends object>(asset: T, folderId: string | null, projectId?: string): boolean
+export function getAssetFolder<T extends object>(asset: T, projectId?: string): string | null
+export function filterAssetsByFolder<T extends object>(assets: T[], folderId?: string | null, projectId?: string): T[]
+export function getFolderCounts<T extends object>(folders: TmcutMediaFolder[], assets: T[], projectId?: string): TmcutFolderCounts
+
+export type TmcutTemplateCategory
+  = | 'intro'
+    | 'outro'
+    | 'split-screen'
+    | 'social'
+    | 'promo'
+    | 'minimal'
+    | 'custom'
+
+export interface TmcutTemplatePlaceholder {
+  id: string
+  type: 'video' | 'image' | 'audio' | 'text'
+  label: string
+  clipId: string
+  trackId?: string
+  defaultContent?: string
+  required?: boolean
+}
+
+export interface TmcutTemplate {
+  id: string
+  name: string
+  description?: string
+  category: TmcutTemplateCategory
+  aspectRatio: '9:16' | '16:9' | '1:1'
+  canvas: {
+    width: number
+    height: number
+    fps: number
+  }
+  durationTicks: MediaTime
+  tracks: TmcutTrack[]
+  markers?: TmcutMarker[]
+  placeholders: TmcutTemplatePlaceholder[]
+  thumbnail?: string
+  author?: string
+  createdAt?: number
+  isBuiltin?: boolean
+}
+
+export interface FilterTemplatesOptions {
+  category?: string
+  aspectRatio?: string
+  search?: string
+}
+
+export interface InstantiateTemplateResult {
+  canvas: { width: number, height: number, fps: number }
+  timeline: {
+    version: number
+    tracks: TmcutTrack[]
+    durationMs: number
+    markers?: TmcutMarker[]
+  }
+  durationMs: number
+}
+
+export const BUILTIN_TEMPLATES: TmcutTemplate[]
+export function getBuiltinTemplates(): TmcutTemplate[]
+export function getTemplateById(templates: TmcutTemplate[] | null | undefined, id: string): TmcutTemplate | null
+export function validateTemplate(template: unknown): { valid: boolean, errors: string[] }
+export function filterTemplates(templates?: TmcutTemplate[] | null, options?: FilterTemplatesOptions): TmcutTemplate[]
+export function createTemplateFromTimeline(timeline: TmcutTimeline, meta?: Partial<TmcutTemplate>): TmcutTemplate
+export function instantiateTemplate(template: TmcutTemplate, options?: { replacements?: Record<string, { src?: string, text?: string, name?: string }> }): InstantiateTemplateResult
+export function replacePlaceholder(timeline: TmcutTimeline, clipId: string, replacement?: { src?: string, text?: string, name?: string, thumbPath?: string }): boolean

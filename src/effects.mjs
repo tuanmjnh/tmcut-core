@@ -19,43 +19,43 @@
 // EffectParam = { name, kind, min?, max?, default?, options? }
 
 export const EFFECT_REGISTRY = {
-  blur: {
+  'blur': {
     type: 'blur',
     label: 'Blur',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 50 }
     ]
   },
-  sharpen: {
+  'sharpen': {
     type: 'sharpen',
     label: 'Sharpen',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 50 }
     ]
   },
-  vignette: {
+  'vignette': {
     type: 'vignette',
     label: 'Vignette',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'intensity', kind: 'number', min: 0, max: 100, default: 50 }
     ]
   },
-  grain: {
+  'grain': {
     type: 'grain',
     label: 'Grain',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 30 },
       { name: 'size', kind: 'enum', options: ['fine', 'medium', 'coarse'], default: 'fine' }
     ]
   },
-  chromakey: {
+  'chromakey': {
     type: 'chromakey',
     label: 'Chroma Key',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'color', kind: 'color', default: '#00ff00' },
       { name: 'similarity', kind: 'number', min: 0, max: 100, default: 30 },
@@ -63,20 +63,20 @@ export const EFFECT_REGISTRY = {
       { name: 'spill', kind: 'bool', default: true }
     ]
   },
-  lut3d: {
+  'lut3d': {
     type: 'lut3d',
     label: 'LUT 3D',
-    renderReady: false,
+    renderReady: true,
     params: [
       // Preset grades for wave 1; file-based `.cube` loading arrives with
       // the compiler round (R4) together with a new `file` param kind.
       { name: 'lut', kind: 'enum', options: ['neutral', 'warm', 'cool', 'cinematic', 'vintage'], default: 'neutral' }
     ]
   },
-  stabilize: {
+  'stabilize': {
     type: 'stabilize',
     label: 'Stabilize',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'strength', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -84,7 +84,7 @@ export const EFFECT_REGISTRY = {
   'eq-grade': {
     type: 'eq-grade',
     label: 'EQ / Grade',
-    renderReady: false,
+    renderReady: true,
     params: [
       { name: 'brightness', kind: 'number', min: -100, max: 100, default: 0 },
       { name: 'contrast', kind: 'number', min: 0, max: 200, default: 100 },
@@ -202,4 +202,101 @@ export function normalizeEffects(list) {
     out.push({ type: entry.type, params: clean })
   }
   return out
+}
+
+/**
+ * Map an array of clip effects to FFmpeg video filter strings (Roadmap R4, core C6).
+ * Safe against dirty or unnormalized inputs (runs normalizeEffects first).
+ * Order of effects is preserved.
+ *
+ * @param {Array<object>} effects
+ * @returns {string[]} array of FFmpeg filter strings
+ */
+export function buildFfmpegEffectFilters(effects) {
+  const clean = normalizeEffects(effects)
+  if (clean.length === 0) return []
+
+  const filters = []
+  for (const { type, params } of clean) {
+    switch (type) {
+      case 'blur': {
+        const amount = Number(params.amount) || 0
+        if (amount > 0) {
+          const sigma = Number(((amount / 100) * 20).toFixed(2))
+          filters.push(`gblur=sigma=${sigma}`)
+        }
+        break
+      }
+      case 'sharpen': {
+        const amount = Number(params.amount) || 0
+        if (amount > 0) {
+          const la = Number(((amount / 100) * 2.5).toFixed(2))
+          filters.push(`unsharp=5:5:${la}:5:5:0.0`)
+        }
+        break
+      }
+      case 'vignette': {
+        const intensity = Number(params.intensity) || 0
+        if (intensity > 0) {
+          const angle = Number(((Math.PI / 4) * (intensity / 100 * 1.5)).toFixed(4))
+          filters.push(`vignette=angle=${angle}`)
+        }
+        break
+      }
+      case 'grain': {
+        const amount = Number(params.amount) || 0
+        if (amount > 0) {
+          const flag = params.size === 'coarse' ? 't' : params.size === 'medium' ? 'u' : 't+u'
+          filters.push(`noise=alls=${Math.round(amount * 0.6)}:allf=${flag}`)
+        }
+        break
+      }
+      case 'chromakey': {
+        const hex = (params.color || '#00ff00').replace('#', '')
+        const sim = (Number(params.similarity || 30) / 100).toFixed(2)
+        const bl = (Number(params.blend || 10) / 100).toFixed(2)
+        filters.push(`colorkey=0x${hex}:${sim}:${bl}`)
+        break
+      }
+      case 'lut3d': {
+        switch (params.lut) {
+          case 'warm':
+            filters.push('colorbalance=rs=0.12:gs=0.02:bs=-0.1')
+            break
+          case 'cool':
+            filters.push('colorbalance=rs=-0.1:gs=0.02:bs=0.15')
+            break
+          case 'cinematic':
+            filters.push('curves=preset=cross_process,eq=contrast=1.1:saturation=1.15')
+            break
+          case 'vintage':
+            filters.push('colorbalance=rs=0.15:gs=0.08:bs=-0.12,eq=contrast=0.95:saturation=0.85')
+            break
+          case 'neutral':
+          default:
+            break
+        }
+        break
+      }
+      case 'stabilize': {
+        const strength = Number(params.strength) || 50
+        const rx = Math.max(8, Math.round((strength / 100) * 32))
+        filters.push(`deshake=rx=${rx}:ry=${rx}:edge=mirror`)
+        break
+      }
+      case 'eq-grade': {
+        const b = Number(params.brightness || 0)
+        const c = Number(params.contrast || 100)
+        const s = Number(params.saturation || 100)
+        if (b !== 0 || c !== 100 || s !== 100) {
+          const bVal = Number((b / 100 * 0.5).toFixed(3))
+          const cVal = Number((c / 100).toFixed(3))
+          const sVal = Number((s / 100).toFixed(3))
+          filters.push(`eq=brightness=${bVal}:contrast=${cVal}:saturation=${sVal}`)
+        }
+        break
+      }
+    }
+  }
+  return filters
 }

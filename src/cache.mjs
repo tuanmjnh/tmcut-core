@@ -43,9 +43,20 @@ export function cachePathFor(cacheDir, kind, key, extension) {
 /**
  * Pure ffmpeg argument plan for a preview proxy (small, fast to decode).
  * The runtime adapter executes it; the core only describes it.
+ *
+ * @param {string} input - Path to source video
+ * @param {string} output - Target proxy file path (.mp4)
+ * @param {number|{width?: number, crf?: number, fps?: number}} [options=960] - Target width or options object
+ * @returns {string[]} FFmpeg argument list
  */
-export function buildProxyArgs(input, output, width = 960) {
-  const target = Math.max(320, Math.floor(width))
+export function buildProxyArgs(input, output, options = 960) {
+  const opts = typeof options === 'number' ? { width: options } : (options || {})
+  const target = Math.max(320, Math.floor(opts.width ?? 960))
+  const crf = String(opts.crf ?? 28)
+  const vfFilters = [`scale=${target}:-2`]
+  if (Number.isFinite(opts.fps) && opts.fps > 0) {
+    vfFilters.push(`fps=${opts.fps}`)
+  }
   return [
     '-y',
     '-hide_banner',
@@ -54,11 +65,17 @@ export function buildProxyArgs(input, output, width = 960) {
     '-i',
     input,
     '-vf',
-    `scale=${target}:-2`,
+    vfFilters.join(','),
+    '-c:v',
+    'libx264',
     '-preset',
     'veryfast',
     '-crf',
-    '28',
+    crf,
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
     output
   ]
 }

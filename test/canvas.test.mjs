@@ -14,7 +14,10 @@ import {
   reframeTransform,
   previewScale,
   safeAreaRects,
-  SAFE_AREA_PRESETS
+  SAFE_AREA_PRESETS,
+  clampCropRect,
+  applyCropRatio,
+  buildBackgroundSource
 } from '../src/canvas.mjs'
 
 describe('canvas', () => {
@@ -160,5 +163,126 @@ describe('safe areas (C13)', () => {
       assert.ok(Number.isFinite(preset.ratio) && preset.ratio > 0)
     }
     assert.ok(ids.includes('16-9') && ids.includes('9-16') && ids.includes('1-1'))
+  })
+
+  it('clamps crop rect inside [0, 1] bounds with min size', () => {
+    // Normal input
+    const clamped = clampCropRect({ x: 0.1, y: 0.2, w: 0.5, h: 0.6 })
+    assert.deepEqual(clamped, { x: 0.1, y: 0.2, w: 0.5, h: 0.6 })
+
+    // Out of bounds input
+    const clampedOob = clampCropRect({ x: 0.8, y: 0.7, w: 0.5, h: 0.5 })
+    assert.equal(clampedOob.w, 0.5)
+    assert.equal(clampedOob.h, 0.5)
+    assert.equal(clampedOob.x, 0.5) // 1 - 0.5
+    assert.equal(clampedOob.y, 0.5) // 1 - 0.5
+
+    // Degenerate / zero input
+    const clampedZero = clampCropRect({ x: -1, y: -1, w: 0.001, h: 0.001 }, 0.05)
+    assert.equal(clampedZero.x, 0)
+    assert.equal(clampedZero.y, 0)
+    assert.equal(clampedZero.w, 0.05)
+    assert.equal(clampedZero.h, 0.05)
+
+    // Null/undefined fallback
+    assert.deepEqual(clampCropRect(null), { x: 0, y: 0, w: 1, h: 1 })
+  })
+
+  it('applies crop aspect ratios centered within source', () => {
+    // 16:9 source (1920x1080), applying 1:1 ratio
+    // Target normalized ratio = 1 / (16/9) = 9/16 = 0.5625
+    const initial = { x: 0, y: 0, w: 1, h: 1 }
+    const square = applyCropRatio(initial, 1, 1920, 1080)
+    assert.equal(square.h, 1)
+    assert.equal(square.w, 0.5625)
+    assert.equal(square.x, 0.2188) // (1 - 0.5625) / 2
+    assert.equal(square.y, 0)
+
+    // Free / null ratio returns clamped rect unchanged
+    assert.deepEqual(applyCropRatio(initial, null), initial)
+  })
+})
+
+describe('buildBackgroundSource (Phase 4)', () => {
+  const baseOpts = { canvasW: 1920, canvasH: 1080, fps: 30, duration: 10 }
+
+  it('returns color source descriptor with 0x hex for color background', () => {
+    const desc = buildBackgroundSource({
+      ...baseOpts,
+      background: { type: 'color', value: '#ff0000' }
+    })
+    assert.equal(desc.type, 'color')
+    assert.equal(desc.kind, 'source')
+    assert.ok(typeof desc.chain === 'string')
+    assert.ok(desc.chain.includes('color=c=0xff0000'))
+    assert.ok(desc.chain.includes('s=1920x1080'))
+    assert.ok(desc.chain.includes('r=30'))
+    assert.ok(desc.chain.includes('d=10.000'))
+  })
+
+  it('defaults to black (0x000000) when color value missing', () => {
+    const desc = buildBackgroundSource({
+      ...baseOpts,
+      background: { type: 'color' }
+    })
+    assert.ok(desc.chain.includes('color=c=0x000000'))
+  })
+
+  it('returns transparent source descriptor (0x00000000) for transparent background', () => {
+    const desc = buildBackgroundSource({
+      ...baseOpts,
+      background: { type: 'transparent' }
+    })
+    assert.equal(desc.type, 'transparent')
+    assert.equal(desc.kind, 'source')
+    assert.ok(desc.chain.includes('color=c=0x00000000'))
+  })
+
+  it('returns image input descriptor for image background', () => {
+    const desc = buildBackgroundSource({
+      ...baseOpts,
+      background: { type: 'image', value: '/path/to/bg.png' }
+    })
+    assert.equal(desc.type, 'image')
+    assert.equal(desc.kind, 'input')
+    assert.equal(desc.file, '/path/to/bg.png')
+    // No -t here: each consumer trims its own window, so the input is a
+    // single looping still for the whole timeline.
+    assert.deepEqual(desc.inputFlags, ['-framerate', '30', '-loop', '1'])
+    assert.ok(desc.tail.includes('scale=1920:1080'))
+    assert.ok(desc.tail.includes('crop=1920:1080'))
+    assert.ok(desc.tail.includes('setsar=1'))
+  })
+
+  it('falls back to black color source when image path is empty', () => {
+    const desc = buildBackgroundSource({
+      ...baseOpts,
+      background: { type: 'image', value: '' }
+    })
+    assert.equal(desc.type, 'color')
+    assert.ok(desc.chain.includes('color=c=0x000000'))
+  })
+
+  it('evenizes canvas dimensions and clamps minimum 2px', () => {
+    const desc = buildBackgroundSource({
+      canvasW: 1921,
+      canvasH: 1081,
+      fps: 30,
+      duration: 5,
+      background: { type: 'color', value: '#00ff00' }
+    })
+    assert.ok(desc.chain.includes('s=1920x1080'))
+  })
+
+  it('handles fractional fps and duration', () => {
+    const desc = buildBackgroundSource({
+      canvasW: 1280,
+      canvasH: 720,
+      fps: 29.97,
+      duration: 7.5,
+      background: { type: 'color', value: '#ffffff' }
+    })
+    assert.ok(desc.chain.includes('r=29.97'))
+    assert.ok(desc.chain.includes('d=7.500'))
   })
 })

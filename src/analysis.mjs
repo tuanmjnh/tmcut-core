@@ -110,36 +110,207 @@ function scoreForProfile(scene, silenceRatio, speechRatio, profile) {
   return { score, reason: speechRatio > 0.4 ? 'speech' : punch > 0.5 ? 'action' : 'filler' }
 }
 
+export const DEFAULT_FILLER_WORDS = [
+  // Vietnamese filler words & hesitation markers
+  'ừm', 'ừ', 'à', 'ờ', 'ơ', 'hả', 'thì', 'là', 'kiểu', 'kiểu như',
+  'nhỉ', 'nhé', 'này nọ', 'nói chung là', 'đại loại là', 'xong rồi',
+  // English filler words
+  'um', 'uh', 'ah', 'er', 'like', 'you know', 'basically', 'literally',
+  'sort of', 'kind of', 'actually', 'i mean', 'right'
+]
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Detect filler words and hesitation phrases in transcript text.
+ * Pure function: string -> { count, words, fillerRatio }.
+ */
+export function detectFillerWords(text, options) {
+  const rawText = String(text ?? '').trim()
+  if (!rawText) return { count: 0, words: [], fillerRatio: 0 }
+
+  const customWords = Array.isArray(options?.customWords) ? options.customWords : []
+  const dictionary = [...DEFAULT_FILLER_WORDS, ...customWords].map(w => String(w).trim().toLowerCase()).filter(Boolean)
+
+  const normalized = rawText.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!normalized) return { count: 0, words: [], fillerRatio: 0 }
+
+  const words = normalized.split(' ').filter(Boolean)
+  const totalWords = words.length
+  if (totalWords === 0) return { count: 0, words: [], fillerRatio: 0 }
+
+  const matched = []
+  let detectedCount = 0
+
+  // Check multi-word phrases first
+  const multiWordFillers = dictionary.filter(w => w.includes(' '))
+  let workingText = normalized
+
+  for (const phrase of multiWordFillers) {
+    const regex = new RegExp(`(^|\\s)${escapeRegex(phrase)}(?=\\s|$)`, 'gi')
+    const matches = workingText.match(regex)
+    if (matches) {
+      const phraseWordCount = phrase.split(' ').length
+      const count = matches.length
+      detectedCount += count * phraseWordCount
+      if (!matched.includes(phrase)) matched.push(phrase)
+      workingText = workingText.replace(regex, ' ')
+    }
+  }
+
+  // Check single words in remainder
+  const singleWordFillers = new Set(dictionary.filter(w => !w.includes(' ')))
+  const remainingWords = workingText.split(' ').filter(Boolean)
+  for (const word of remainingWords) {
+    if (singleWordFillers.has(word)) {
+      detectedCount += 1
+      if (!matched.includes(word)) matched.push(word)
+    }
+  }
+
+  const fillerRatio = Math.min(1, Math.round((detectedCount / totalWords) * 100) / 100)
+  return {
+    count: detectedCount,
+    words: matched,
+    fillerRatio
+  }
+}
+
+/**
+ * Analyze transcript segment for filler words and highlight keywords.
+ */
+export function analyzeTranscriptSegment(text, options) {
+  const rawText = String(text ?? '').trim()
+  if (!rawText) {
+    return {
+      isFiller: false,
+      isHighlight: false,
+      scoreModifier: 0,
+      matchedKeywords: [],
+      detectedFillers: []
+    }
+  }
+
+  const filterFillers = options?.filterFillerWords !== false
+  const keywords = Array.isArray(options?.keywords)
+    ? options.keywords.map(k => String(k).trim().toLowerCase()).filter(Boolean)
+    : []
+
+  const fillerResult = filterFillers
+    ? detectFillerWords(rawText, { customWords: options?.customFillerWords })
+    : { count: 0, words: [], fillerRatio: 0 }
+
+  // A segment is classified as a filler segment if >= 25% of words are fillers, or >= 2 filler words
+  const isFiller = filterFillers && (fillerResult.fillerRatio >= 0.25 || (fillerResult.count >= 2 && fillerResult.fillerRatio >= 0.15))
+
+  // Check priority keywords
+  const matchedKeywords = []
+  const normalized = rawText.toLowerCase()
+  for (const kw of keywords) {
+    if (normalized.includes(kw) && !matchedKeywords.includes(kw)) {
+      matchedKeywords.push(kw)
+    }
+  }
+  const isHighlight = matchedKeywords.length > 0
+
+  let scoreModifier = 0
+  if (isFiller) {
+    scoreModifier = -0.35 // Penalty for hesitation/filler
+  } else if (isHighlight) {
+    scoreModifier = 0.25 // Boost for keyword presence
+  }
+
+  return {
+    isFiller,
+    isHighlight,
+    scoreModifier,
+    matchedKeywords,
+    detectedFillers: fillerResult.words
+  }
+}
+
 /**
  * Score scenes into an Edit Decision List (docs section 38).
- * speech: optional [{ start, end }] ranges (verbose transcript); the
+ * speech / transcript: optional [{ start, end, text? }] ranges; the
  * scorer degrades gracefully without it.
  */
 export function scoreSegments(input) {
   const scenes = Array.isArray(input?.scenes) ? input.scenes : []
   const silences = Array.isArray(input?.silences) ? input.silences : []
-  const speech = Array.isArray(input?.speech) ? input.speech : []
+  const rawSpeech = Array.isArray(input?.speech) ? input.speech : []
+  const rawTranscript = Array.isArray(input?.transcript) ? input.transcript : []
+  const speech = rawSpeech.length > 0 ? rawSpeech : rawTranscript
+  const transcript = rawTranscript.length > 0 ? rawTranscript : rawSpeech
   const profile = PROFILES.includes(input?.profile) ? input.profile : 'viral-shorts'
   const assetId = typeof input?.assetId === 'string' ? input.assetId : ''
+  const filterFillerWords = input?.filterFillerWords !== false
+  const keywords = Array.isArray(input?.keywords) ? input.keywords : []
+  const customFillerWords = Array.isArray(input?.customFillerWords) ? input.customFillerWords : []
+
   const segments = scenes.map((scene) => {
     const duration = Math.max(0, scene.end - scene.start)
     const silenceRatio = duration > 0 ? clamp01(overlapDuration(scene.start, scene.end, silences) / duration) : 1
     const speechRatio = duration > 0 ? clamp01(overlapDuration(scene.start, scene.end, speech) / duration) : 0
-    const { score, reason } = scoreForProfile(scene, silenceRatio, speechRatio, profile)
-    return {
+    let { score, reason } = scoreForProfile(scene, silenceRatio, speechRatio, profile)
+
+    // Transcript text analysis per scene
+    const overlappingTexts = transcript
+      .filter(item => item?.text && item.start < scene.end && item.end > scene.start)
+      .map(item => String(item.text).trim())
+      .filter(Boolean)
+    const fullTranscriptText = overlappingTexts.join(' ')
+
+    let hasFillerWords = false
+    let detectedFillers = undefined
+    let isHighlight = false
+    let matchedKeywords = undefined
+
+    if (fullTranscriptText.length > 0) {
+      const analysis = analyzeTranscriptSegment(fullTranscriptText, {
+        filterFillerWords,
+        keywords,
+        customFillerWords
+      })
+      if (analysis.isFiller) {
+        hasFillerWords = true
+        detectedFillers = analysis.detectedFillers
+        score = Math.max(0.05, clamp01(score * 0.4))
+        reason = 'filler-word'
+      } else if (analysis.isHighlight) {
+        isHighlight = true
+        matchedKeywords = analysis.matchedKeywords
+        score = clamp01(score + analysis.scoreModifier)
+        reason = 'highlight'
+      }
+    }
+
+    const seg = {
       start: round3(scene.start),
       end: round3(scene.end),
       score: Math.round(score * 1000) / 1000,
       reason,
       thumb: round3(scene.start + duration / 2)
     }
+    if (fullTranscriptText.length > 0) seg.transcriptText = fullTranscriptText
+    if (hasFillerWords) {
+      seg.hasFillerWords = true
+      seg.detectedFillers = detectedFillers
+    }
+    if (isHighlight) {
+      seg.isHighlight = true
+      seg.matchedKeywords = matchedKeywords
+    }
+    return seg
   }).filter(segment => segment.end > segment.start)
+
   return {
     version: 1,
     assetId,
     profile,
     segments,
     createdAt: new Date().toISOString(),
-    analyzerVersion: input?.analyzerVersion || 'scene-1'
+    analyzerVersion: input?.analyzerVersion || 'transcript-v2'
   }
 }
