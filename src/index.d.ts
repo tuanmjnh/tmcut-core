@@ -15,6 +15,9 @@ import type {
   TmcutFitMode,
   TmcutOrientation,
   TmcutCropRect,
+  TmcutTextAnimationType,
+  TmcutStabilizeLevel,
+  TmcutStabilizeStatus,
   MediaTime
 } from '../types/dsl.js'
 import type { TmcutAssetKind, TmcutMediaMetadata } from '../types/media.js'
@@ -35,6 +38,9 @@ export type {
   TmcutFitMode,
   TmcutOrientation,
   TmcutCropRect,
+  TmcutTextAnimationType,
+  TmcutStabilizeLevel,
+  TmcutStabilizeStatus,
   MediaTime
 } from '../types/dsl.js'
 export type { TmcutAssetKind } from '../types/media.js'
@@ -605,6 +611,20 @@ export interface TmcutTemplatePlaceholder {
   required?: boolean
 }
 
+/**
+ * Track shape stored inside a template payload. Templates round-trip
+ * whatever timeline items the HOST app holds (v1 second-based clips in
+ * tm-tools, v3 clips elsewhere) — the engine only touches id/type/items
+ * structurally, so the clip shape stays intentionally loose here.
+ * `validateTemplate` is the runtime gate, not the type system.
+ */
+export interface TmcutTemplateTrack {
+  id?: string
+  type: 'video' | 'text' | 'audio'
+  name?: string
+  items: unknown[]
+}
+
 export interface TmcutTemplate {
   id: string
   name: string
@@ -617,7 +637,7 @@ export interface TmcutTemplate {
     fps: number
   }
   durationTicks: MediaTime
-  tracks: TmcutTrack[]
+  tracks: TmcutTemplateTrack[]
   markers?: TmcutMarker[]
   placeholders: TmcutTemplatePlaceholder[]
   thumbnail?: string
@@ -636,11 +656,17 @@ export interface InstantiateTemplateResult {
   canvas: { width: number, height: number, fps: number }
   timeline: {
     version: number
-    tracks: TmcutTrack[]
+    tracks: TmcutTemplateTrack[]
     durationMs: number
     markers?: TmcutMarker[]
   }
   durationMs: number
+}
+
+/** Anything track-shaped `createTemplateFromTimeline` can snapshot. */
+export type TmcutTemplateSourceTimeline = {
+  tracks?: TmcutTemplateTrack[]
+  markers?: TmcutMarker[]
 }
 
 export const BUILTIN_TEMPLATES: TmcutTemplate[]
@@ -648,6 +674,6 @@ export function getBuiltinTemplates(): TmcutTemplate[]
 export function getTemplateById(templates: TmcutTemplate[] | null | undefined, id: string): TmcutTemplate | null
 export function validateTemplate(template: unknown): { valid: boolean, errors: string[] }
 export function filterTemplates(templates?: TmcutTemplate[] | null, options?: FilterTemplatesOptions): TmcutTemplate[]
-export function createTemplateFromTimeline(timeline: TmcutTimeline, meta?: Partial<TmcutTemplate>): TmcutTemplate
+export function createTemplateFromTimeline(timeline: TmcutTemplateSourceTimeline, meta?: Partial<TmcutTemplate>): TmcutTemplate
 export function instantiateTemplate(template: TmcutTemplate, options?: { replacements?: Record<string, { src?: string, text?: string, name?: string }> }): InstantiateTemplateResult
 export function replacePlaceholder(timeline: TmcutTimeline, clipId: string, replacement?: { src?: string, text?: string, name?: string, thumbPath?: string }): boolean
