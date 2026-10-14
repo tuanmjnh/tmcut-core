@@ -87,7 +87,7 @@ export const BUILTIN_TEMPLATES = [
             opacity: 100,
             rotation: 0,
             in: 0,
-            out: 3,
+            out: 360000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -112,7 +112,7 @@ export const BUILTIN_TEMPLATES = [
             rotation: 0,
             fit: 'crop',
             in: 0,
-            out: 3,
+            out: 360000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -131,7 +131,7 @@ export const BUILTIN_TEMPLATES = [
             name: 'Whoosh SFX',
             src: '',
             in: 0,
-            out: 3,
+            out: 360000,
             offset: 0,
             speed: 1,
             volume: 90,
@@ -208,7 +208,7 @@ export const BUILTIN_TEMPLATES = [
             opacity: 100,
             rotation: 0,
             in: 0,
-            out: 5,
+            out: 600000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -233,7 +233,7 @@ export const BUILTIN_TEMPLATES = [
             rotation: 0,
             fit: 'fit',
             in: 0,
-            out: 5,
+            out: 600000,
             offset: 0,
             speed: 1,
             fade: { in: TICKS_PER_SECOND, out: TICKS_PER_SECOND },
@@ -255,7 +255,7 @@ export const BUILTIN_TEMPLATES = [
             name: 'Ambient Soundtrack',
             src: '',
             in: 0,
-            out: 5,
+            out: 600000,
             offset: 0,
             speed: 1,
             volume: 80,
@@ -327,7 +327,7 @@ export const BUILTIN_TEMPLATES = [
             opacity: 100,
             rotation: 0,
             in: 0,
-            out: 6,
+            out: 720000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -353,7 +353,7 @@ export const BUILTIN_TEMPLATES = [
             fit: 'crop',
             cropRect: { x: 0, y: 0.1, w: 1, h: 0.8 },
             in: 0,
-            out: 6,
+            out: 720000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -379,7 +379,7 @@ export const BUILTIN_TEMPLATES = [
             fit: 'crop',
             cropRect: { x: 0, y: 0.1, w: 1, h: 0.8 },
             in: 0,
-            out: 6,
+            out: 720000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -452,7 +452,7 @@ export const BUILTIN_TEMPLATES = [
             opacity: 100,
             rotation: 0,
             in: 0,
-            out: 4,
+            out: 480000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -475,9 +475,9 @@ export const BUILTIN_TEMPLATES = [
             scale: 100,
             opacity: 100,
             rotation: 0,
-            in: 0.5,
-            out: 4,
-            offset: 0.5,
+            in: 60000,
+            out: 480000,
+            offset: 60000,
             speed: 1,
             effects: [],
             keyframes: []
@@ -501,7 +501,7 @@ export const BUILTIN_TEMPLATES = [
             rotation: 0,
             fit: 'fit',
             in: 0,
-            out: 4,
+            out: 480000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -574,7 +574,7 @@ export const BUILTIN_TEMPLATES = [
             opacity: 100,
             rotation: 0,
             in: 0,
-            out: 6,
+            out: 720000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -597,9 +597,9 @@ export const BUILTIN_TEMPLATES = [
             scale: 100,
             opacity: 100,
             rotation: 0,
-            in: 0.8,
-            out: 6,
-            offset: 0.8,
+            in: 96000,
+            out: 720000,
+            offset: 96000,
             speed: 1,
             effects: [],
             keyframes: []
@@ -623,7 +623,7 @@ export const BUILTIN_TEMPLATES = [
             rotation: 0,
             fit: 'cover',
             in: 0,
-            out: 6,
+            out: 720000,
             offset: 0,
             speed: 1,
             effects: [
@@ -691,9 +691,9 @@ export const BUILTIN_TEMPLATES = [
             scale: 100,
             opacity: 100,
             rotation: 0,
-            in: 0.5,
-            out: 4.5,
-            offset: 0.5,
+            in: 60000,
+            out: 540000,
+            offset: 60000,
             speed: 1,
             effects: [],
             keyframes: []
@@ -717,7 +717,7 @@ export const BUILTIN_TEMPLATES = [
             rotation: 0,
             fit: 'fit',
             in: 0,
-            out: 5,
+            out: 600000,
             offset: 0,
             speed: 1,
             effects: [],
@@ -808,11 +808,18 @@ export function filterTemplates(templates, options = {}) {
 /**
  * Creates a template snapshot from an existing timeline.
  */
+/**
+ * Snapshot a host timeline into a reusable template.
+ *
+ * C16-R3: the host model stores integer TICKS (tmcut-core time.mjs), so
+ * flat item geometry (in/out/offset) and marker times are ticks here too.
+ * Duration is derived from the largest item end.
+ */
 export function createTemplateFromTimeline(timeline, meta = {}) {
   const tracks = deepClone(timeline?.tracks || [])
   const markers = deepClone(timeline?.markers || [])
 
-  let maxEndSec = 0
+  let maxEndTicks = 0
   const placeholders = []
 
   // Collect clips and auto-generate placeholders
@@ -820,8 +827,11 @@ export function createTemplateFromTimeline(timeline, meta = {}) {
     track.id = track.id || `tr-${trkIdx + 1}`
     if (Array.isArray(track.items)) {
       track.items.forEach((item, itemIdx) => {
-        const itemEnd = (item.offset ?? 0) + ((item.out ?? 5) - (item.in ?? 0)) / (item.speed || 1)
-        if (itemEnd > maxEndSec) maxEndSec = itemEnd
+        const speed = item.speed || 1
+        const inTicks = item.in ?? 0
+        const outTicks = item.out ?? 5 * TICKS_PER_SECOND
+        const itemEnd = (item.offset ?? 0) + (outTicks - Math.max(0, Number.isFinite(inTicks) ? inTicks : 0)) / speed
+        if (itemEnd > maxEndTicks) maxEndTicks = itemEnd
 
         placeholders.push({
           id: `ph-${track.type}-${trkIdx + 1}-${itemIdx + 1}`,
@@ -836,7 +846,7 @@ export function createTemplateFromTimeline(timeline, meta = {}) {
     }
   })
 
-  const durationTicks = Math.max(TICKS_PER_SECOND, Math.round(maxEndSec * TICKS_PER_SECOND))
+  const durationTicks = Math.max(TICKS_PER_SECOND, Math.round(maxEndTicks))
 
   const template = {
     id: meta.id || uid('usr_tpl'),

@@ -3,10 +3,13 @@
 // (no app imports — the core stays dependency-free).
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { v1ClipToV3, v3ClipToV1, v1TracksToV3, v1MatchesV3, syncV3Result } from '../src/v1compat.mjs'
+import {
+  v1ClipToV3, v3ClipToV1, v1TracksToV3, v1MatchesV3, syncV3Result,
+  ticksClipToV3, v3ClipToTicks, ticksTracksToV3, ticksMatchesV3, syncTicksResult
+} from '../src/v1compat.mjs'
 import { duplicateClips, rippleDelete } from '../src/editing.mjs'
 import { splitClip } from '../src/timeline.mjs'
-import { secToTicks } from '../src/time.mjs'
+import { secToTicks, TICKS_PER_SECOND } from '../src/time.mjs'
 
 function v1Clip(partial = {}) {
   return {
@@ -355,5 +358,82 @@ describe('v1compat', () => {
     assert.equal(tracks[1].muted, false)
     assert.equal(tracks[1].locked, true)
     assert.equal(tracks[1].hidden, true)
+  })
+
+  // ---- C16-R3: ticks-native bridge (live store). in/out/offset are ----
+  // ---- integer TICKS; the round-trip must be an exact identity.     ----
+  describe('ticks bridge (C16-R3)', () => {
+    function tickClip(partial = {}) {
+      return {
+        id: 'clip_t',
+        name: 'a.mp4',
+        src: 'D:/Videos/a.mp4',
+        in: 2 * TICKS_PER_SECOND,
+        out: 12 * TICKS_PER_SECOND,
+        offset: 0,
+        speed: 1,
+        opacity: 80,
+        scale: 100,
+        x: 10,
+        y: 20,
+        rotation: 0,
+        volume: 100,
+        effects: [],
+        keyframes: [],
+        ...partial
+      }
+    }
+    function tickTracks() {
+      return [{ id: 't-video-1', type: 'video', name: 'Video 1', items: [tickClip()] }]
+    }
+
+    it('maps ticks fields to v3 without a second scaling', () => {
+      const v3 = ticksClipToV3(tickClip(), 'video')
+      assert.equal(v3.source.in, 2 * TICKS_PER_SECOND)
+      assert.equal(v3.source.out, 12 * TICKS_PER_SECOND)
+      assert.equal(v3.timeline.duration, 10 * TICKS_PER_SECOND)
+      assert.equal(v3.transform.opacity, 0.8)
+    })
+
+    it('round-trips ticks losslessly (integer identity)', () => {
+      const tracks = tickTracks()
+      const v3 = ticksTracksToV3(tracks)
+      const back = v3ClipToTicks(v3.tracks[0].items[0])
+      assert.equal(back.in, 2 * TICKS_PER_SECOND)
+      assert.equal(back.out, 12 * TICKS_PER_SECOND)
+      assert.ok(ticksMatchesV3(tracks[0].items[0], v3.tracks[0].items[0]))
+      const stats = syncTicksResult(tracks, v3)
+      assert.deepEqual(stats, { added: 0, updated: 0, removed: 0 })
+    })
+
+    it('sub-tick source maps to whole ticks (identity of the store unit)', () => {
+      // The live store never holds sub-tick values, but the bridge must
+      // still produce integers, never a fractional tick.
+      const v3 = ticksClipToV3(tickClip({ in: 0, out: 1.4 }), 'video')
+      assert.equal(v3.source.in, 0)
+      assert.equal(v3.source.out, 1)
+    })
+
+    it('splits/duplicates/ripples then syncs ticks back to the store', () => {
+      const tracks = [{ id: 't-video-1', type: 'video', name: 'V', items: [tickClip({ id: 'x' })] }]
+      const v3 = ticksTracksToV3(tracks)
+      // Split at TIMELINE offset 4 ticks: the source cut lands at
+      // in(2 ticks) + 4 = 6 ticks (speed 1).
+      assert.ok(splitClip(v3, 'x', 4 * TICKS_PER_SECOND))
+      syncTicksResult(tracks, v3)
+      const [first, tail] = tracks[0].items
+      assert.equal(first.out, 6 * TICKS_PER_SECOND)
+      assert.equal(tail.in, 6 * TICKS_PER_SECOND)
+      assert.equal(tail.out, 12 * TICKS_PER_SECOND)
+    })
+
+    it('seconds bridge stays for migration (never used on the ticks store)', () => {
+      // A legacy SECONDS item fed to the seconds bridge scales by TICKS;
+      // feeding the SAME object to the ticks bridge would misread it —
+      // pinning the two flavors apart so they are never swapped.
+      const legacy = { id: 'c', in: 2, out: 12, offset: 1, speed: 1 }
+      assert.equal(v1ClipToV3(legacy, 'video').source.in, 2 * TICKS_PER_SECOND)
+      assert.equal(ticksClipToV3(legacy, 'video').source.in, 2) // raw tick, wrong for legacy — documented hazard
+    })
   })
 })

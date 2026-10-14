@@ -1,13 +1,20 @@
 // =============================================================================
 //  @tmcut/core — v1compat
-//  Transitional bridge between the app v1 timeline shape (float seconds,
-//  numeric opacity/scale, path srcs) and the DSL v3 engine (integer ticks,
+//  Transitional bridge between the app's flat timeline shape (numeric
+//  opacity/scale, path srcs) and the DSL v3 engine (integer ticks,
 //  rational transforms, assetId+locator). Structural typing only — no app
 //  imports, so the core stays dependency-free. DELETE after the app state
 //  migrates to v3 natively.
+//
+//  C16-R3: two conversion flavors share one structural core:
+//   - SECONDS: legacy flat items (float seconds) — used ONLY for file
+//     migration (opening pre-C16-R3 project files, recovery copies).
+//   - TICKS:   live store (integer ticks) — the app store now holds
+//     in/out/offset natively in ticks, so the per-edit bridge is
+//     identity on time fields (no double conversion, ulp-noise free).
 // =============================================================================
 
-import { secToTicks, ticksToSec } from './time.mjs'
+import { secToTicks, ticksToSec, TICKS_PER_SECOND } from './time.mjs'
 
 const EPS = 1e-6
 
@@ -19,11 +26,28 @@ function num(value, fallback = 0) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-/** v1 clip -> v3 clip (structural, any object with v1 fields). */
-export function v1ClipToV3(item, trackType) {
+// ---- Time-field converters (the ONLY difference between the bridges) ----
+
+const SECONDS = {
+  // flat seconds -> v3 source ticks (legacy files)
+  toSource: value => Math.max(0, secToTicks(num(value))),
+  // v3 ticks -> flat seconds (legacy files, 4-decimal rounding)
+  fromSource: ticks => round4(ticksToSec(ticks)),
+  defaultOut: 5
+}
+
+const TICKS = {
+  // flat ticks -> v3 source ticks (identity, rounded to integer)
+  toSource: value => Math.max(0, Math.round(num(value))),
+  // v3 ticks -> flat ticks (identity, rounded to integer)
+  fromSource: ticks => Math.round(ticks),
+  defaultOut: 5 * TICKS_PER_SECOND
+}
+
+function clipToV3(item, trackType, conv) {
   const speed = num(item.speed, 1) > 0 ? num(item.speed, 1) : 1
-  const sourceIn = Math.max(0, Math.round(secToTicks(num(item.in))))
-  const sourceOut = Math.max(sourceIn + 1, Math.round(secToTicks(item.out ?? 5)))
+  const sourceIn = Math.max(0, conv.toSource(item.in))
+  const sourceOut = Math.max(sourceIn + 1, conv.toSource(item.out ?? conv.defaultOut))
   const scale = num(item.scale, 100) / 100
   const opacity = num(item.opacity, 100)
   return {
@@ -34,7 +58,7 @@ export function v1ClipToV3(item, trackType) {
     locator: item.src ? { runtime: 'electron', path: item.src } : null,
     source: { in: sourceIn, out: sourceOut },
     timeline: {
-      start: Math.max(0, Math.round(secToTicks(num(item.offset)))),
+      start: Math.max(0, Math.round(conv.toSource(item.offset ?? 0))),
       duration: Math.max(1, Math.round((sourceOut - sourceIn) / speed))
     },
     speed,
@@ -79,8 +103,17 @@ export function v1ClipToV3(item, trackType) {
   }
 }
 
-/** v1 track list -> v3 timeline (tracks keep their ids for merge-back). */
+/** Legacy v1 (seconds) track list -> v3 timeline (file migration path). */
 export function v1TracksToV3(tracks) {
+  return tracksToV3(tracks, SECONDS)
+}
+
+/** C16-R3: live store (ticks) track list -> v3 timeline (per-edit path). */
+export function ticksTracksToV3(tracks) {
+  return tracksToV3(tracks, TICKS)
+}
+
+function tracksToV3(tracks, conv) {
   return {
     version: 3,
     tracks: (tracks ?? []).map(track => ({
@@ -90,14 +123,23 @@ export function v1TracksToV3(tracks) {
       muted: track.muted,
       locked: track.locked,
       hidden: track.hidden,
-      items: (track.items ?? []).map(item => v1ClipToV3(item, track.type))
+      items: (track.items ?? []).map(item => clipToV3(item, track.type, conv))
     })),
     markers: []
   }
 }
 
-/** v3 clip -> v1 field patch (floats rounded to 4 decimals, ulp-noise free). */
-export function v3ClipToV1(clip) {
+/** Legacy v1 (seconds) clip -> v3 clip (structural, any object with flat fields). */
+export function v1ClipToV3(item, trackType) {
+  return clipToV3(item, trackType, SECONDS)
+}
+
+/** C16-R3: ticks clip -> v3 clip. */
+export function ticksClipToV3(item, trackType) {
+  return clipToV3(item, trackType, TICKS)
+}
+
+function v3ClipToFlat(clip, conv) {
   const patch = {
     id: clip.id,
     name: clip.name,
@@ -112,9 +154,9 @@ export function v3ClipToV1(clip) {
     align: clip.align,
     shadow: clip.shadow,
     stroke: clip.stroke,
-    in: round4(ticksToSec(clip.source.in)),
-    out: round4(ticksToSec(clip.source.out)),
-    offset: round4(ticksToSec(clip.timeline.start)),
+    in: conv.fromSource(clip.source.in),
+    out: conv.fromSource(clip.source.out),
+    offset: conv.fromSource(clip.timeline.start),
     speed: clip.speed,
     reverse: clip.reverse ?? false,
     opacity: round4(clip.transform.opacity * 100),
@@ -145,16 +187,26 @@ export function v3ClipToV1(clip) {
   return patch
 }
 
+/** v3 clip -> legacy v1 (seconds) field patch. */
+export function v3ClipToV1(clip) {
+  return v3ClipToFlat(clip, SECONDS)
+}
+
+/** C16-R3: v3 clip -> ticks field patch (identity time round-trip). */
+export function v3ClipToTicks(clip) {
+  return v3ClipToFlat(clip, TICKS)
+}
+
 const COMPARE_NUMBERS = ['in', 'out', 'offset', 'speed', 'opacity', 'scale', 'x', 'y', 'rotation', 'volume', 'fontSize', 'focusX', 'focusY', 'animInDuration', 'animOutDuration']
 // groupId/linkId must be compared or relation-only core edits (C9
-// grouping) get silently dropped by syncV3Result.
+// grouping) get silently dropped by the sync step.
 // fontFamily/fontFile (C-1) must be compared so a font-only edit syncs
 // back AND split/paste/duplicate clones (which copy the v3 clip verbatim)
-// keep the picked face on their new v1 items.
+// keep the picked face on their new flat items.
 const COMPARE_STRINGS = ['name', 'src', 'text', 'color', 'fit', 'groupId', 'linkId', 'fontFamily', 'fontFile', 'align', 'animIn', 'animOut', 'stabilizeLevel', 'stabilizedPath', 'stabilizeStatus']
-// Text style flags (C-2): undefined and false compare EQUAL — v1 items
+// Text style flags (C-2): undefined and false compare EQUAL — flat items
 // from older projects lack the keys, so a strict compare would rewrite
-// every untouched clip on open. `reverse` is here too: v1 items often
+// every untouched clip on open. `reverse` is here too: flat items often
 // lack it (undefined) while v3 normalizes to false, so treat undefined
 // as false — a real reverse toggle must sync back (R74).
 const COMPARE_FLAGS = ['bold', 'italic', 'shadow', 'stroke', 'stabilize', 'reverse']
@@ -226,9 +278,18 @@ function sameCropRect(a, b) {
     && sameValue(num(a.h, 1), num(b.h, 1))
 }
 
-/** True when a v1 item already matches a v3 clip (untouched clips skip). */
+/** True when a flat item already matches a v3 clip (untouched clips skip). */
 export function v1MatchesV3(item, clip) {
-  const patch = v3ClipToV1(clip)
+  return matchesV3(item, clip, SECONDS)
+}
+
+/** C16-R3: ticks-native match check. */
+export function ticksMatchesV3(item, clip) {
+  return matchesV3(item, clip, TICKS)
+}
+
+function matchesV3(item, clip, conv) {
+  const patch = v3ClipToFlat(clip, conv)
   for (const key of COMPARE_NUMBERS) {
     if (!sameValue(num(item[key], 0), num(patch[key], 0))) return false
   }
@@ -255,51 +316,60 @@ export function v1MatchesV3(item, clip) {
 }
 
 /**
- * Merge a mutated v3 timeline back into v1 tracks (matched by id).
+ * Merge a mutated v3 timeline back into flat tracks (matched by id).
  * Untouched clips are NOT rewritten (epsilon compare); new ids are
- * appended (creating v1 tracks when the v3 track is unknown); ids absent
- * from v3 are removed, and so are v1 tracks whose id no longer exists in
- * v3 (track add/remove flows through here). Returns
+ * appended (creating tracks when the v3 track is unknown); ids absent
+ * from v3 are removed, and so are flat tracks whose id no longer exists
+ * in v3 (track add/remove flows through here). Returns
  * { added, updated, removed } for clips.
  */
 export function syncV3Result(v1Tracks, afterV3) {
+  return syncResult(v1Tracks, afterV3, SECONDS)
+}
+
+/** C16-R3: ticks-native merge back into the live store. */
+export function syncTicksResult(v1Tracks, afterV3) {
+  return syncResult(v1Tracks, afterV3, TICKS)
+}
+
+function syncResult(flatTracks, afterV3, conv) {
   const stats = { added: 0, updated: 0, removed: 0 }
-  const v1ById = new Map()
-  for (const track of v1Tracks ?? []) {
+  const flatById = new Map()
+  for (const track of flatTracks ?? []) {
     for (let index = 0; index < (track.items ?? []).length; index += 1) {
-      v1ById.set(track.items[index].id, { track, index })
+      flatById.set(track.items[index].id, { track, index })
     }
   }
   const v3Ids = new Set()
   for (const v3Track of afterV3?.tracks ?? []) {
-    let v1Track = (v1Tracks ?? []).find(track => track.id === v3Track.id)
-    if (!v1Track) {
-      v1Track = { id: v3Track.id, type: v3Track.type, name: v3Track.name ?? v3Track.type, items: [] }
-      v1Tracks.push(v1Track)
+    let flatTrack = (flatTracks ?? []).find(track => track.id === v3Track.id)
+    if (!flatTrack) {
+      flatTrack = { id: v3Track.id, type: v3Track.type, name: v3Track.name ?? v3Track.type, items: [] }
+      flatTracks.push(flatTrack)
     }
     // Sync track-level flags (muted/locked/hidden) from v3 so a track
-    // toggle survives the live round-trip (R74). v1 items often lack
+    // toggle survives the live round-trip (R74). Flat items often lack
     // these keys, so treat undefined as false.
     const trackPatch = {}
     if (v3Track.muted !== undefined) trackPatch.muted = !!v3Track.muted
     if (v3Track.locked !== undefined) trackPatch.locked = !!v3Track.locked
     if (v3Track.hidden !== undefined) trackPatch.hidden = !!v3Track.hidden
     if (Object.keys(trackPatch).length > 0) {
-      Object.assign(v1Track, trackPatch)
+      Object.assign(flatTrack, trackPatch)
     }
     for (const clip of v3Track.items ?? []) {
       v3Ids.add(clip.id)
-      const location = v1ById.get(clip.id)
+      const location = flatById.get(clip.id)
       if (!location) {
-        v1Track.items.push(v3ClipToV1(clip))
+        flatTrack.items.push(v3ClipToFlat(clip, conv))
         stats.added += 1
-      } else if (!v1MatchesV3(location.track.items[location.index], clip)) {
-        Object.assign(location.track.items[location.index], v3ClipToV1(clip))
+      } else if (!matchesV3(location.track.items[location.index], clip, conv)) {
+        Object.assign(location.track.items[location.index], v3ClipToFlat(clip, conv))
         stats.updated += 1
       }
     }
   }
-  for (const track of v1Tracks ?? []) {
+  for (const track of flatTracks ?? []) {
     for (let index = (track.items ?? []).length - 1; index >= 0; index -= 1) {
       if (!v3Ids.has(track.items[index].id)) {
         track.items.splice(index, 1)
@@ -308,8 +378,8 @@ export function syncV3Result(v1Tracks, afterV3) {
     }
   }
   const v3TrackIds = new Set((afterV3?.tracks ?? []).map(track => track.id))
-  for (let index = (v1Tracks ?? []).length - 1; index >= 0; index -= 1) {
-    if (!v3TrackIds.has(v1Tracks[index].id)) v1Tracks.splice(index, 1)
+  for (let index = (flatTracks ?? []).length - 1; index >= 0; index -= 1) {
+    if (!v3TrackIds.has(flatTracks[index].id)) flatTracks.splice(index, 1)
   }
   return stats
 }

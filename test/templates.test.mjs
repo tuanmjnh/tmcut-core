@@ -99,7 +99,7 @@ test('templates: createTemplateFromTimeline extracts template with auto placehol
         type: 'video',
         name: 'Video',
         items: [
-          { id: 'c1', name: 'Intro Clip', in: 0, out: 4, offset: 0, speed: 1, src: 'media/test.mp4' }
+          { id: 'c1', name: 'Intro Clip', in: 0, out: 4 * TICKS_PER_SECOND, offset: 0, speed: 1, src: 'media/test.mp4' }
         ]
       },
       {
@@ -107,7 +107,7 @@ test('templates: createTemplateFromTimeline extracts template with auto placehol
         type: 'text',
         name: 'Text',
         items: [
-          { id: 'c2', name: 'Welcome', text: 'HELLO WORLD', in: 0, out: 3, offset: 0, speed: 1 }
+          { id: 'c2', name: 'Welcome', text: 'HELLO WORLD', in: 0, out: 3 * TICKS_PER_SECOND, offset: 0, speed: 1 }
         ]
       }
     ],

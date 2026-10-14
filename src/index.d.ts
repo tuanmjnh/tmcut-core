@@ -242,10 +242,19 @@ export function parseSrt(text: string): TranscriptCue[]
 export function serializeSrt(cues: TranscriptCue[]): string
 
 // --- Audio fades + gain math (Roadmap C12) ---
-// Clips accept both shapes: v3 (timeline.duration ticks) and the legacy
-// v1 flat item (in/out SECONDS), same dual-shape contract as evalKeyframe.
+// Clips accept three shapes (same dual-shape contract as evalKeyframe):
+//  - a full v3 timeline clip;
+//  - a SHAPE-SHORTCUT `{ timeline: { duration } }` — enough for the fade
+//    math (C16-R3: the ticks store hands duration explicitly so the
+//    legacy flat branch never sees tick values);
+//  - the legacy v1 flat item (in/out SECONDS) — file-migration hosts only.
 export type TmcutClipFadeEdge = 'in' | 'out'
 export type CoreFadeClip = TmcutTimelineClip | {
+  timeline: { start?: number, duration: number }
+  speed?: number
+  volume?: number
+  fade?: { in: number, out: number }
+} | {
   /** Legacy v1 flat item: source range in SECONDS. */
   in: number
   out: number
@@ -316,6 +325,18 @@ export function v1TracksToV3(tracks: CoreV1Track[]): TmcutTimeline
 export function v3ClipToV1(clip: TmcutTimelineClip): CoreV1TrackItem
 export function v1MatchesV3(item: CoreV1TrackItem, clip: TmcutTimelineClip): boolean
 export function syncV3Result(v1Tracks: CoreV1Track[], afterV3: TmcutTimeline): CoreV3SyncStats
+
+/**
+ * C16-R3 ticks-native bridge (the live-store path). Same structural rules
+ * as the seconds bridge above, but the flat item's `in`/`out`/`offset`
+ * are integer TICKS — so the per-edit conversion is a lossless identity
+ * on time fields. The seconds versions remain for FILE MIGRATION only.
+ */
+export function ticksClipToV3(item: CoreV1TrackItem, trackType: CoreTrackType): TmcutTimelineClip
+export function ticksTracksToV3(tracks: CoreV1Track[]): TmcutTimeline
+export function v3ClipToTicks(clip: TmcutTimelineClip): CoreV1TrackItem
+export function ticksMatchesV3(item: CoreV1TrackItem, clip: TmcutTimelineClip): boolean
+export function syncTicksResult(v1Tracks: CoreV1Track[], afterV3: TmcutTimeline): CoreV3SyncStats
 
 export function parseSceneOutput(stderrText: unknown, durationSec: number): CoreSceneSegment[]
 export function parseSilenceOutput(stderrText: unknown, durationSec: number): CoreSilenceRange[]
