@@ -88,7 +88,10 @@ export const EFFECT_REGISTRY = {
     params: [
       { name: 'brightness', kind: 'number', min: -100, max: 100, default: 0 },
       { name: 'contrast', kind: 'number', min: 0, max: 200, default: 100 },
-      { name: 'saturation', kind: 'number', min: 0, max: 200, default: 100 }
+      { name: 'saturation', kind: 'number', min: 0, max: 200, default: 100 },
+      // R117: color temperature — negative = cooler (blue), positive =
+      // warmer (amber). Mapped to FFmpeg colorbalance (red/blue) at export.
+      { name: 'temp', kind: 'number', min: -100, max: 100, default: 0 }
     ]
   }
 }
@@ -293,6 +296,15 @@ export function buildFfmpegEffectFilters(effects) {
           const cVal = Number((c / 100).toFixed(3))
           const sVal = Number((s / 100).toFixed(3))
           filters.push(`eq=brightness=${bVal}:contrast=${cVal}:saturation=${sVal}`)
+        }
+        // R117: color temperature — negative = cooler (blue), positive =
+        // warmer (amber). Mapped to FFmpeg colorbalance red/blue; the
+        // value is clamped to [-1, 1] so a stray param never breaks the
+        // graph (real-FFmpeg verified, same range as the lut3d presets).
+        const t = Number(params.temp || 0)
+        if (t !== 0) {
+          const r = Number(Math.max(-1, Math.min(1, t / 100)).toFixed(3))
+          filters.push(`colorbalance=rs=${r}:bs=${-r}`)
         }
         break
       }

@@ -95,7 +95,7 @@ describe('effects (C6)', () => {
     const [blurred] = normalizeEffects([{ type: 'blur', params: { amount: 999 } }])
     assert.equal(blurred.params.amount, 100)
     const [graded] = normalizeEffects([{ type: 'eq-grade', params: { brightness: 'x', contrast: 150 } }])
-    assert.deepEqual(graded.params, { brightness: 0, contrast: 150, saturation: 100 })
+    assert.deepEqual(graded.params, { brightness: 0, contrast: 150, saturation: 100, temp: 0 })
     const [keyed] = normalizeEffects([{ type: 'chromakey', params: { color: 'green' } }])
     assert.equal(keyed.params.color, '#00ff00')
     const [loose] = normalizeEffects([{ type: 'blur' }])
