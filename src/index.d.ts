@@ -378,7 +378,16 @@ export function scoreSegments(input: {
   filterFillerWords?: boolean
   keywords?: string[]
   customFillerWords?: string[]
+  /** AI content-triage opinions (docs §194); blended conservatively with aiWeight. */
+  aiScores?: Array<{ start: number, end: number, interest: number }>
+  aiWeight?: number
 }): TmcutEdl
+
+/** Beat-weighted average AI interest over a span; null when no overlap. */
+export function blendSceneInterest(
+  scene: { start: number, end: number },
+  aiScores: Array<{ start: number, end: number, interest: number }>
+): number | null
 
 export interface TmcutCanvasPresetDef {
   id: string

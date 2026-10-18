@@ -21,6 +21,12 @@ export interface TmcutEdlSegment {
   isHighlight?: boolean
   /** list of matched priority keywords */
   matchedKeywords?: string[]
+  /**
+   * AI content-triage interest (0..1) blended into `score` for this
+   * segment (docs §194). Present only when an AI triage pass supplied
+   * overlapping scores — the local score alone is the honest default.
+   */
+  aiInterest?: number
 }
 
 export type TmcutAutocutProfile = 'viral-shorts' | 'podcast-summary' | 'cinematic-vlog'

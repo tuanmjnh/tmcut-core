@@ -6,6 +6,7 @@ import {
   parseSilenceOutput,
   overlapDuration,
   scoreSegments,
+  blendSceneInterest,
   detectFillerWords,
   analyzeTranscriptSegment
 } from '../src/analysis.mjs'
@@ -153,5 +154,76 @@ describe('analysis', () => {
 
     // Segment 2: regular speech
     assert.equal(edl.segments[2].reason, 'speech')
+  })
+
+  // ===== AI content-triage blend (docs §194) ================================
+
+  it('blendSceneInterest weights by overlap and returns null without data', () => {
+    const half = blendSceneInterest({ start: 0, end: 10 }, [{ start: 0, end: 5, interest: 1 }])
+    // Interest counted ONLY over the 5s overlap → mean 1 there, but the
+    // beat weight is overlap-based, so full-scene mean over beats covered:
+    assert.equal(half, 1)
+    const mid = blendSceneInterest({ start: 0, end: 10 }, [
+      { start: 0, end: 5, interest: 0 },
+      { start: 5, end: 10, interest: 1 }
+    ])
+    assert.equal(mid, 0.5)
+    assert.equal(blendSceneInterest({ start: 0, end: 10 }, []), null)
+    assert.equal(blendSceneInterest({ start: 0, end: 10 }, [{ start: 20, end: 30, interest: 1 }]), null)
+    // malformed items are skipped, never NaN
+    assert.equal(blendSceneInterest({ start: 0, end: 10 }, [{ start: 0, end: 5, interest: 'x' }]), null)
+  })
+
+  it('aiScores pull the score toward AI interest by aiWeight', () => {
+    // Partial speech coverage keeps the LOCAL score below 1 (a fully
+    // covered scene already maxes out — nothing to pull toward).
+    const base = scoreSegments({
+      assetId: 'a1', profile: 'podcast-summary',
+      scenes: [{ start: 0, end: 10 }], silences: [], speech: [{ start: 0, end: 8 }]
+    })
+    const boosted = scoreSegments({
+      assetId: 'a1', profile: 'podcast-summary',
+      scenes: [{ start: 0, end: 10 }], silences: [], speech: [{ start: 0, end: 8 }],
+      aiScores: [{ start: 0, end: 10, interest: 1 }]
+    })
+    const local = base.segments[0].score
+    const mixed = boosted.segments[0].score
+    // Contract: blended = max(0.05, score + (1 - score) * 0.25), rounded
+    // from the UNROUNDED local score, so compare against that formula.
+    const rawLocal = 0.15 + 0.8 * 0.85
+    assert.equal(mixed, Math.max(0.05, Math.round((rawLocal + (1 - rawLocal) * 0.25) * 1000) / 1000))
+    assert.equal(boosted.segments[0].aiInterest, 1)
+    assert.ok(mixed > local && mixed <= 1)
+    // Without aiScores the segment has NO aiInterest field (honesty rule).
+    assert.equal('aiInterest' in base.segments[0], false)
+  })
+
+  it('aiWeight 0 disables the blend and no-overlap segments keep local scores', () => {
+    const plain = scoreSegments({
+      assetId: 'a1', profile: 'viral-shorts',
+      scenes: [{ start: 0, end: 5 }, { start: 20, end: 25 }],
+      aiScores: [{ start: 0, end: 5, interest: 1 }], aiWeight: 0
+    })
+    assert.equal('aiInterest' in plain.segments[0], false)
+    const partial = scoreSegments({
+      assetId: 'a1', profile: 'viral-shorts',
+      scenes: [{ start: 0, end: 5 }, { start: 20, end: 25 }],
+      aiScores: [{ start: 0, end: 5, interest: 1 }]
+    })
+    assert.equal(partial.segments[0].aiInterest, 1)
+    assert.equal('aiInterest' in partial.segments[1], false)
+  })
+
+  it('AI interest softens toward 0 but never undoes a filler penalty upward', () => {
+    const edl = scoreSegments({
+      assetId: 'a1', profile: 'podcast-summary',
+      scenes: [{ start: 0, end: 5 }], silences: [],
+      transcript: [{ start: 0, end: 5, text: 'ừm ờ thì kiểu như là ừm ờ' }],
+      aiScores: [{ start: 0, end: 5, interest: 1 }]
+    })
+    assert.equal(edl.segments[0].reason, 'filler-word')
+    // min() guard: an AI "interesting!" opinion must not lift a filler seg.
+    assert.ok(edl.segments[0].score < 0.5)
+    assert.equal(edl.segments[0].aiInterest, 1)
   })
 })

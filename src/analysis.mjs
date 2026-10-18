@@ -232,9 +232,38 @@ export function analyzeTranscriptSegment(text, options) {
 }
 
 /**
+ * Blend AI content-triage interest scores into a scene (docs §194).
+ * `aiScores`: [{ start, end, interest }] — interest already clamped 0..1.
+ * Interest over a beat-weighted overlap average, so a triage item covering
+ * only a corner of a shot only moves that corner's share of the score.
+ * Returns null when the scene has NO overlap with any item (no AI data,
+ * leave the local score untouched — never invent a value).
+ */
+export function blendSceneInterest(scene, aiScores) {
+  const items = Array.isArray(aiScores) ? aiScores : []
+  let beats = 0
+  let weighted = 0
+  for (const item of items) {
+    const start = Number(item?.start)
+    const end = Number(item?.end)
+    const interest = Number(item?.interest)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(interest)) continue
+    const overlap = overlapDuration(scene.start, scene.end, [{ start, end }])
+    if (overlap <= 0) continue
+    beats += overlap
+    weighted += overlap * Math.min(1, Math.max(0, interest))
+  }
+  if (beats <= 0) return null
+  return weighted / beats
+}
+
+/**
  * Score scenes into an Edit Decision List (docs section 38).
  * speech / transcript: optional [{ start, end, text? }] ranges; the
  * scorer degrades gracefully without it.
+ * aiScores: optional [{ start, end, interest }] from an AI content-triage
+ * pass (docs §194); blended conservatively into the local score with
+ * aiWeight (default 0.25, clamped 0..0.5 — AI is an opinion, not truth).
  */
 export function scoreSegments(input) {
   const scenes = Array.isArray(input?.scenes) ? input.scenes : []
@@ -248,6 +277,9 @@ export function scoreSegments(input) {
   const filterFillerWords = input?.filterFillerWords !== false
   const keywords = Array.isArray(input?.keywords) ? input.keywords : []
   const customFillerWords = Array.isArray(input?.customFillerWords) ? input.customFillerWords : []
+  const rawAiScores = Array.isArray(input?.aiScores) ? input.aiScores : []
+  const aiWeight = Math.min(0.5, Math.max(0, Number(input?.aiWeight ?? 0.25) || 0))
+  const aiUsed = rawAiScores.length > 0 && aiWeight > 0
 
   const segments = scenes.map((scene) => {
     const duration = Math.max(0, scene.end - scene.start)
@@ -286,6 +318,23 @@ export function scoreSegments(input) {
       }
     }
 
+    // AI interest blend (docs §194): move the local score toward the
+    // triaged interest by aiWeight. Conservative on purpose — a 0.25
+    // weight shifts a 0.5 local score at most to 0.625.
+    let aiInterest
+    if (aiUsed) {
+      const interest = blendSceneInterest(scene, rawAiScores)
+      if (interest !== null) {
+        aiInterest = Math.round(interest * 1000) / 1000
+        const blended = score + (interest - score) * aiWeight
+        // A filler penalty may only be pushed FURTHER down by a low AI
+        // interest — never softened back up (the local transcript evidence
+        // is fact, the AI opinion is not).
+        score = reason === 'filler-word' ? Math.min(score, blended) : clamp01(blended)
+        score = Math.max(0.05, Math.round(score * 1000) / 1000)
+      }
+    }
+
     const seg = {
       start: round3(scene.start),
       end: round3(scene.end),
@@ -293,6 +342,7 @@ export function scoreSegments(input) {
       reason,
       thumb: round3(scene.start + duration / 2)
     }
+    if (aiInterest !== undefined) seg.aiInterest = aiInterest
     if (fullTranscriptText.length > 0) seg.transcriptText = fullTranscriptText
     if (hasFillerWords) {
       seg.hasFillerWords = true
