@@ -21,13 +21,57 @@
 import { TICKS_PER_SECOND } from './time.mjs'
 import { clipDurationTicks, clipEndTicks, findClip } from './timeline.mjs'
 
+// The 6 original keys keep their order and semantics (stored projects).
+// The 39 keys added in R128 are the remaining FFmpeg `xfade` transition
+// names (alphabetical): the renderer maps any of them straight to
+// `xfade=transition=<name>` — see the app-side catalog (fxCatalog.ts)
+// for the UI categories and the legacy-name aliases (wipe-left -> wipeleft…).
 export const KNOWN_TRANSITIONS = [
   'fade',
   'dissolve',
   'wipe-left',
   'wipe-right',
   'slide-left',
-  'zoom-in'
+  'zoom-in',
+  'circleclose',
+  'circlecrop',
+  'circleopen',
+  'diagbl',
+  'diagbr',
+  'diagtl',
+  'diagtr',
+  'distance',
+  'fadeblack',
+  'fadegrays',
+  'fadewhite',
+  'hblur',
+  'hlslice',
+  'hrslice',
+  'horzclose',
+  'horzopen',
+  'pixelize',
+  'radial',
+  'rectcrop',
+  'slidedown',
+  'slideright',
+  'slideup',
+  'smoothdown',
+  'smoothleft',
+  'smoothright',
+  'smoothup',
+  'squeezeh',
+  'squeezev',
+  'vertclose',
+  'vertopen',
+  'vdslice',
+  'vuslice',
+  'wipebl',
+  'wipebr',
+  'wipedown',
+  'wipetl',
+  'wipetr',
+  'wipeup',
+  'zoomin'
 ]
 
 // Positions round-trip through the app's v1 seconds model (1e-4 s grid),

@@ -23,9 +23,23 @@ function pair() {
 
 describe('transitions (C5)', () => {
   it('refuses unknown types and non-positive durations', () => {
+    // R128 froze this exact 45-key list: the 6 legacy keys first (stored
+    // projects), then the remaining xfade names in alphabetical order.
+    // The app-side catalog test pins the same list — change one, change both.
     assert.deepEqual(KNOWN_TRANSITIONS, [
-      'fade', 'dissolve', 'wipe-left', 'wipe-right', 'slide-left', 'zoom-in'
+      'fade', 'dissolve', 'wipe-left', 'wipe-right', 'slide-left', 'zoom-in',
+      'circleclose', 'circlecrop', 'circleopen', 'diagbl', 'diagbr', 'diagtl',
+      'diagtr', 'distance', 'fadeblack', 'fadegrays', 'fadewhite', 'hblur',
+      'hlslice', 'hrslice', 'horzclose', 'horzopen', 'pixelize', 'radial',
+      'rectcrop', 'slidedown', 'slideright', 'slideup', 'smoothdown',
+      'smoothleft', 'smoothright', 'smoothup', 'squeezeh', 'squeezev',
+      'vertclose', 'vertopen', 'vdslice', 'vuslice', 'wipebl', 'wipebr',
+      'wipedown', 'wipetl', 'wipetr', 'wipeup', 'zoomin'
     ])
+    assert.equal(new Set(KNOWN_TRANSITIONS).size, KNOWN_TRANSITIONS.length)
+    // R128 keys must validate as known types (canApplyTransition gate).
+    const fresh = pair()
+    assert.deepEqual(canApplyTransition(fresh.timeline, fresh.b.id, 'circleopen', secToTicks(0.5)), { ok: true, overlapTicks: secToTicks(0.5) })
     const { timeline, b } = pair()
     assert.deepEqual(
       canApplyTransition(timeline, b.id, 'star-wipe', secToTicks(0.5)),

@@ -7,13 +7,28 @@ const FIRST_WAVE = [
   'blur', 'sharpen', 'vignette', 'grain', 'chromakey', 'lut3d', 'stabilize', 'eq-grade'
 ]
 
+// R128: the registry grew from 8 to a CapCut-scale library, so the pin is
+// structural (shape + honesty) instead of an exact key list — plus a guard
+// that the original 8 keys never disappear (stored projects depend on them).
+const CATEGORIES = ['blur', 'sharpen', 'light', 'color', 'stylize', 'distort', 'keying', 'motion', 'retro', 'texture']
+
+// Effects allowed to produce zero filters at their DEFAULT params: a LUT
+// preset named 'neutral' is a deliberate no-op grade. Nothing else may be
+// in this list — renderReady:true means "buildFfmpegEffectFilters emits a
+// filter at registry defaults" (honesty rule, roadmap R128).
+const NO_OP_AT_DEFAULT = ['lut3d']
+
 describe('effects (C6)', () => {
-  it('registry ships the first wave with no empty keys', () => {
-    assert.deepEqual(Object.keys(EFFECT_REGISTRY).sort(), [...FIRST_WAVE].sort())
+  it('registry keeps the first wave and stays structurally sound', () => {
+    for (const legacy of FIRST_WAVE) {
+      assert.ok(EFFECT_REGISTRY[legacy], `lost legacy effect: ${legacy}`)
+    }
+    assert.ok(Object.keys(EFFECT_REGISTRY).length > FIRST_WAVE.length, 'R128 expansion missing')
     for (const [key, desc] of Object.entries(EFFECT_REGISTRY)) {
       assert.ok(key.length > 0)
       assert.equal(desc.type, key)
       assert.ok(desc.label.length > 0)
+      assert.ok(CATEGORIES.includes(desc.category), `${key}: bad category ${desc.category}`)
       assert.ok(Array.isArray(desc.params) && desc.params.length > 0)
       for (const param of desc.params) {
         assert.ok(param.name.length > 0)
@@ -26,9 +41,59 @@ describe('effects (C6)', () => {
         if (param.kind === 'enum') assert.ok(Array.isArray(param.options) && param.options.length > 0)
         assert.ok('default' in param)
       }
-      // Honesty flag: mapped to FFmpeg filters in R4.
+      // Honesty flag: every shipped effect is mapped to FFmpeg filters.
       assert.equal(desc.renderReady, true)
     }
+  })
+
+  it('every renderReady effect emits filters at its default params (honesty rule)', () => {
+    for (const [key, desc] of Object.entries(EFFECT_REGISTRY)) {
+      const defaults = Object.fromEntries(desc.params.map(p => [p.name, p.default]))
+      const filters = buildFfmpegEffectFilters([{ type: key, params: defaults }])
+      if (NO_OP_AT_DEFAULT.includes(key)) {
+        // The no-op allowance is narrow: only the neutral preset qualifies.
+        const nonNeutral = desc.params.find(p => p.kind === 'enum' && p.options.length > 1)
+        assert.ok(nonNeutral, `${key}: whitelisted no-op but has no multi-option enum`)
+        for (const option of nonNeutral.options) {
+          if (option === defaults[nonNeutral.name]) continue
+          const f = buildFfmpegEffectFilters([{ type: key, params: { ...defaults, [nonNeutral.name]: option } }])
+          assert.ok(f.length >= 1, `${key}: enum option ${option} renders nothing`)
+        }
+        continue
+      }
+      assert.ok(Array.isArray(filters) && filters.length >= 1, `${key}: renderReady but emits no filter at defaults`)
+      // The renderer comma-chains the output: every entry must stay a plain
+      // linear filter list element — no filtergraph labels or sub-graphs.
+      assert.ok(filters.every(f => typeof f === 'string' && f.length > 0 && !f.includes(';') && !f.includes('[')),
+        `${key}: filters must be comma-chain-safe (no ';' or '[' graph syntax)`)
+    }
+  })
+
+  it('lut3d ships the R128 preset grid (>= 18 grades)', () => {
+    const lut = EFFECT_REGISTRY.lut3d.params.find(p => p.name === 'lut')
+    assert.ok(lut.options.length >= 18)
+    // Ambient presets were the original five presets, minus the R128 neutral
+    // no-op prepended — stored projects resolve 'warm'/'cool'/… byte-identically.
+    assert.deepEqual(lut.options.slice(0, 5), ['neutral', 'warm', 'cool', 'cinematic', 'vintage'])
+    assert.ok(lut.options.includes('teal-orange'))
+    assert.ok(lut.options.includes('cyberpunk'))
+    // An unknown preset must still validate-reject (options list is the whitelist).
+    assert.ok(validateEffect({ type: 'lut3d', params: { lut: 'nope' } }).length > 0)
+  })
+
+  it('eq-grade carries the R128 grading params', () => {
+    const names = EFFECT_REGISTRY['eq-grade'].params.map(p => p.name)
+    for (const n of ['brightness', 'contrast', 'saturation', 'temp', 'hue', 'gamma', 'fade', 'vibrance']) {
+      assert.ok(names.includes(n), `eq-grade missing ${n}`)
+    }
+    // Non-default extras must actually reach the filter chain.
+    const filters = buildFfmpegEffectFilters([
+      { type: 'eq-grade', params: { brightness: 0, contrast: 100, saturation: 100, temp: 0, hue: 30, gamma: 120, fade: 40, vibrance: 25 } }
+    ])
+    const joined = filters.join(',')
+    assert.ok(joined.includes('hue=h=30'))
+    assert.ok(joined.includes('gamma=1.2'))
+    assert.ok(joined.includes('vibrance=intensity=0.25'))
   })
 
   it('validates shape and rejects unknown types', () => {
@@ -67,7 +132,7 @@ describe('effects (C6)', () => {
       /must be a boolean/
     )
     assert.match(
-      validateEffect({ type: 'lut3d', params: { lut: 'noir' } })[0],
+      validateEffect({ type: 'lut3d', params: { lut: 'not-a-preset' } })[0],
       /not in options/
     )
   })
@@ -95,7 +160,8 @@ describe('effects (C6)', () => {
     const [blurred] = normalizeEffects([{ type: 'blur', params: { amount: 999 } }])
     assert.equal(blurred.params.amount, 100)
     const [graded] = normalizeEffects([{ type: 'eq-grade', params: { brightness: 'x', contrast: 150 } }])
-    assert.deepEqual(graded.params, { brightness: 0, contrast: 150, saturation: 100, temp: 0 })
+    // R128 added hue/gamma/fade/vibrance — normalize fills every default.
+    assert.deepEqual(graded.params, { brightness: 0, contrast: 150, saturation: 100, temp: 0, hue: 0, gamma: 100, fade: 0, vibrance: 0 })
     const [keyed] = normalizeEffects([{ type: 'chromakey', params: { color: 'green' } }])
     assert.equal(keyed.params.color, '#00ff00')
     const [loose] = normalizeEffects([{ type: 'blur' }])
