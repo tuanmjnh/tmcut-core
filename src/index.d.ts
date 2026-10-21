@@ -740,6 +740,61 @@ export function createDownloadQueue(options?: {
 }): AssetCenterQueueSnapshot
 export function storageReport(installed: AssetCenterInstalledAsset[], options?: { usedProjectIds?: string[], quotaBytes?: number }): AssetCenterStorageReport
 
+// --- AI Edit Plan (Roadmap v3 PART C) ---
+// Closed-vocabulary edit operations. The validator is the security gate
+// (no paths, no unknown verbs, media by opaque ref only); the applier runs
+// exclusively through core timeline commands.
+export const AI_EDIT_PLAN_SCHEMA_VERSION: number
+export const EDIT_OPERATION_TYPES: string[]
+
+export interface AiEditOperation {
+  type: string
+  [key: string]: unknown
+}
+
+export interface AiEditPlan {
+  schemaVersion?: number
+  intentSummary?: string
+  assumptions?: string[]
+  target?: { durationTicks?: number }
+  operations: AiEditOperation[]
+}
+
+export interface AiEditPlanCheck {
+  valid: boolean
+  errors: string[]
+}
+
+export function validateEditPlan(plan: unknown, options?: {
+  timeline?: unknown
+  mediaRefs?: Iterable<string>
+}): AiEditPlanCheck
+
+export interface AiEditPlanTraceStep {
+  index: number
+  type: string
+  ok: boolean
+  reason: string | null
+}
+
+export interface AiEditPlanTrace {
+  applied: AiEditPlanTraceStep[]
+  skipped: AiEditPlanTraceStep[]
+  warnings: string[]
+}
+
+export function applyEditPlan(timeline: unknown, plan: AiEditPlan, options?: {
+  mediaResolution?: Record<string, { src: string, name?: string }>
+  canvas?: { width: number, height: number, fps: number } | null
+}): AiEditPlanTrace
+
+export function parseEditPlanReply(text: string, options?: {
+  timeline?: unknown
+  mediaRefs?: Iterable<string>
+}): { ok: boolean, plan?: AiEditPlan, errors?: string[] }
+
+export function summarizeEditPlan(plan: AiEditPlan | null | undefined, labels?: Record<string, string>): string[]
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'
