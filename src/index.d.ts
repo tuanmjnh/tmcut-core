@@ -788,6 +788,12 @@ export interface TmcutTemplate {
   tracks: TmcutTemplateTrack[]
   markers?: TmcutMarker[]
   placeholders: TmcutTemplatePlaceholder[]
+  /** Template schema version (absent = v1; migrateTemplate stamps it). */
+  schemaVersion?: number
+  /** Content revision of THIS template (bump when the user edits it). */
+  version?: number
+  /** Asset references derived from clip refs (roadmap §6.4 step 2). */
+  requiredAssets?: TemplateRequiredAssetRef[]
   thumbnail?: string
   author?: string
   createdAt?: number
@@ -818,9 +824,27 @@ export type TmcutTemplateSourceTimeline = {
 }
 
 export const BUILTIN_TEMPLATES: TmcutTemplate[]
+export const TEMPLATE_SCHEMA_VERSION: number
+export const TEMPLATE_MIN_SUPPORTED_VERSION: number
 export function getBuiltinTemplates(): TmcutTemplate[]
 export function getTemplateById(templates: TmcutTemplate[] | null | undefined, id: string): TmcutTemplate | null
 export function validateTemplate(template: unknown): { valid: boolean, errors: string[] }
+export interface TemplateMigrationResult {
+  migrated: Record<string, unknown> | null
+  errors: string[]
+}
+export function migrateTemplate(raw: unknown): TemplateMigrationResult
+export interface TemplateRequiredAssetRef {
+  assetId: string
+  required: boolean
+  fallback: string
+  sourceHint?: string
+}
+export function checkRequiredAssets(template: unknown, view?: { installedIds?: string[] }): {
+  satisfied: TemplateRequiredAssetRef[]
+  missingAssets: TemplateRequiredAssetRef[]
+  localNeeds: TemplateRequiredAssetRef[]
+}
 export function filterTemplates(templates?: TmcutTemplate[] | null, options?: FilterTemplatesOptions): TmcutTemplate[]
 export function createTemplateFromTimeline(timeline: TmcutTemplateSourceTimeline, meta?: Partial<TmcutTemplate>): TmcutTemplate
 export function instantiateTemplate(template: TmcutTemplate, options?: { replacements?: Record<string, { src?: string, text?: string, name?: string }> }): InstantiateTemplateResult

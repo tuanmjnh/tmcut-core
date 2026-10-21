@@ -7,6 +7,15 @@
 
 import { TICKS_PER_SECOND } from './time.mjs'
 
+// Template schema contract (roadmap v3 §6.2 / PART K Phase 3). Every new
+// template records the schema version it was written against; imports run
+// through migrateTemplate so old files keep loading and FUTURE versions are
+// refused instead of being half-read. v1 = the shape every existing template
+// (builtins + R131 exports) already uses — version fields are optional
+// there, and their ABSENCE is the v1 signal on purpose.
+export const TEMPLATE_SCHEMA_VERSION = 1
+export const TEMPLATE_MIN_SUPPORTED_VERSION = 1
+
 let templateCounter = 0
 
 function uid(prefix = 'tpl') {
@@ -17,6 +26,20 @@ function uid(prefix = 'tpl') {
 function deepClone(obj) {
   if (obj === null || typeof obj !== 'object') return obj
   return JSON.parse(JSON.stringify(obj))
+}
+
+// File name of a src (either path flavour) — display hint only, never a path.
+function fileNameFromSrc(src) {
+  const parts = String(src).split(/[\\/]/)
+  return parts[parts.length - 1] || ''
+}
+
+// Stable-ish identity for a local src: the file name. A full absolute path
+// would leak another user's directory layout into a shared template, so the
+// fingerprint is intentionally name-only (collisions just mean the apply
+// flow asks once instead of twice).
+function localAssetFingerprint(src) {
+  return fileNameFromSrc(src)
 }
 
 /**
@@ -774,10 +797,80 @@ export function validateTemplate(template) {
   if (!Array.isArray(template.tracks)) {
     errors.push('Template tracks must be an array')
   }
+  // schemaVersion is optional (absent = v1); anything present must be a
+  // known, supported version number.
+  if (template.schemaVersion !== undefined) {
+    if (!Number.isFinite(template.schemaVersion) || !Number.isInteger(template.schemaVersion) || template.schemaVersion < 1) {
+      errors.push('Invalid template schemaVersion')
+    } else if (template.schemaVersion > TEMPLATE_SCHEMA_VERSION) {
+      errors.push(`Template schemaVersion ${template.schemaVersion} is newer than this build supports (${TEMPLATE_SCHEMA_VERSION})`)
+    }
+  }
   return {
     valid: errors.length === 0,
     errors
   }
+}
+
+/**
+ * Migrate a raw (untrusted, possibly older) template object to the current
+ * template schema. Returns { migrated, errors }: on any structural problem
+ * the template is NOT usable and the caller must refuse it (roadmap §6.4:
+ * validate schema + compatibility BEFORE anything else). A missing
+ * schemaVersion means v1 (every template written before versioning).
+ */
+export function migrateTemplate(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { migrated: null, errors: ['Template must be an object'] }
+  }
+  const tpl = deepClone(raw)
+  const declared = Number.isInteger(tpl.schemaVersion) && tpl.schemaVersion >= 1
+    ? tpl.schemaVersion
+    : TEMPLATE_MIN_SUPPORTED_VERSION
+  if (declared > TEMPLATE_SCHEMA_VERSION) {
+    return {
+      migrated: null,
+      errors: [`Template was created by a newer TMCut (schema v${declared}); update the app to open it`]
+    }
+  }
+  // v1 -> current: identical shape; stamp the version so downstream code
+  // (Asset Center required-asset checks, AI plan builder) can trust it.
+  tpl.schemaVersion = TEMPLATE_SCHEMA_VERSION
+  const validation = validateTemplate(tpl)
+  if (!validation.valid) {
+    return { migrated: null, errors: validation.errors }
+  }
+  return { migrated: tpl, errors: [] }
+}
+
+/**
+ * Check a template's requiredAssets against the caller's installed-asset
+ * view (roadmap §6.4 step 2 — rights/install state BEFORE building).
+ * Pure: the host supplies what is installed; this classifies the need.
+ *
+ * @param {object} template
+ * @param {{ installedIds?: string[] }} view - catalog ids that have a
+ *   VERIFIED installed version (the Asset Center registry).
+ * @returns {{ satisfied: object[], missingAssets: object[], localNeeds: object[] }}
+ */
+export function checkRequiredAssets(template, view = {}) {
+  const installed = new Set(Array.isArray(view.installedIds) ? view.installedIds : [])
+  const satisfied = []
+  const missingAssets = []
+  const localNeeds = []
+  for (const ref of (template?.requiredAssets || [])) {
+    if (!ref || typeof ref.assetId !== 'string') continue
+    if (ref.assetId.startsWith('local:')) {
+      // Files the template author had locally: the importing user always
+      // resolves these themselves (ask-user), never a silent substitute.
+      localNeeds.push(ref)
+    } else if (installed.has(ref.assetId)) {
+      satisfied.push(ref)
+    } else {
+      missingAssets.push(ref)
+    }
+  }
+  return { satisfied, missingAssets, localNeeds }
 }
 
 /**
@@ -848,8 +941,36 @@ export function createTemplateFromTimeline(timeline, meta = {}) {
 
   const durationTicks = Math.max(TICKS_PER_SECOND, Math.round(maxEndTicks))
 
+  // Roadmap v3 §6.4 step 2: a template records the assets its clips need so
+  // applying it can check install/rights state BEFORE building anything.
+  // src-bearing non-text clips become references; user-local paths are NOT
+  // stable ids, so they are captured as suggestions (fallback 'ask-user')
+  // instead of pretending to be catalog entries.
+  const requiredAssets = []
+  const seenSrc = new Set()
+  tracks.forEach((track) => {
+    if (!Array.isArray(track.items)) return
+    for (const item of track.items) {
+      if (!item || track.type === 'text') continue
+      const src = typeof item.src === 'string' ? item.src : ''
+      if (!src || seenSrc.has(src)) continue
+      seenSrc.add(src)
+      // asset://<catalog-id> references are stable; everything else is a
+      // local file the importing user must supply (ask-user fallback).
+      const catalogRef = /^asset:\/\//.test(src) ? src.slice('asset://'.length) : ''
+      requiredAssets.push({
+        assetId: catalogRef ? `asset:${catalogRef}` : `local:${localAssetFingerprint(src)}`,
+        required: true,
+        fallback: 'ask-user',
+        sourceHint: catalogRef ? '' : fileNameFromSrc(src)
+      })
+    }
+  })
+
   const template = {
+    schemaVersion: TEMPLATE_SCHEMA_VERSION,
     id: meta.id || uid('usr_tpl'),
+    version: 1,
     name: meta.name || 'Custom Template',
     description: meta.description || '',
     category: meta.category || 'custom',
@@ -860,6 +981,7 @@ export function createTemplateFromTimeline(timeline, meta = {}) {
     tracks,
     markers,
     placeholders: meta.placeholders || placeholders,
+    requiredAssets,
     createdAt: meta.createdAt || Date.now(),
     isBuiltin: false
   }
