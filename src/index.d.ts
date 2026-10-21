@@ -795,6 +795,60 @@ export function parseEditPlanReply(text: string, options?: {
 
 export function summarizeEditPlan(plan: AiEditPlan | null | undefined, labels?: Record<string, string>): string[]
 
+/** Shared fenced/balanced JSON extractor used by both plan parsers. */
+export function extractJsonObject(text: string): Record<string, unknown> | null
+
+// --- AI Template Plan (Roadmap v3 §6.5) ---
+// add-clip-only plan vocabulary that BUILDS a real template through core
+// commands. Output flows through the normal template pipeline.
+export const TEMPLATE_PLAN_SCHEMA_VERSION: number
+
+export interface AiTemplatePlanOp {
+  type: 'add-clip'
+  trackType: 'video' | 'audio' | 'text'
+  name?: string
+  text?: string
+  mediaRef?: string
+  in?: number
+  out?: number
+  offset?: number
+  color?: string
+  fontSize?: number
+  effects?: unknown[]
+  [key: string]: unknown
+}
+
+export interface AiTemplatePlan {
+  schemaVersion?: number
+  intentSummary?: string
+  template: {
+    name: string
+    description?: string
+    category?: string
+    aspectRatio?: string
+    width?: number
+    height?: number
+    fps?: number
+  }
+  operations: AiTemplatePlanOp[]
+}
+
+export function validateTemplatePlan(plan: unknown, options?: {
+  mediaRefs?: Iterable<string>
+}): { valid: boolean, errors: string[] }
+
+export function parseTemplatePlanReply(text: string, options?: {
+  mediaRefs?: Iterable<string>
+}): { ok: boolean, plan?: AiTemplatePlan, errors?: string[] }
+
+export function buildTemplateFromPlan(plan: AiTemplatePlan, options?: {
+  mediaResolution?: Record<string, { src: string, name?: string }>
+  provider?: string | null
+  model?: string | null
+}): { template: TmcutTemplate, warnings: string[] }
+
+export function summarizeTemplatePlan(plan: AiTemplatePlan | null | undefined): string[]
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'
@@ -853,6 +907,8 @@ export interface TmcutTemplate {
   author?: string
   createdAt?: number
   isBuiltin?: boolean
+  /** §6.5 provenance label — AI-built templates only; display metadata. */
+  generatedBy?: { tool: string, provider?: string | null, model?: string | null, at?: number } | null
 }
 
 export interface FilterTemplatesOptions {

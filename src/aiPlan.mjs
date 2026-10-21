@@ -392,18 +392,13 @@ export function applyEditPlan(timeline, plan, options = {}) {
 }
 
 /**
- * Parse a raw model reply (free text, often markdown-fenced) into a plan
- * candidate. Extraction never throws: garbage is { ok: false }.
- * The BOUNDED-REPAIR contract: `errors` are meant to be appended to the
- * prompt on the retry turn.
+ * Extract the first plausible JSON object from a free-text model reply
+ * (markdown fences stripped, then whole text, then a brace span). Never
+ * throws — garbage yields null. Shared by the Edit Plan and Template Plan
+ * parsers (bounded-repair contract: report, then retry once).
  */
-export function parseEditPlanReply(text, options = {}) {
-  if (typeof text !== 'string' || text.trim() === '') {
-    return { ok: false, errors: ['empty reply'] }
-  }
-  let candidate = null
-  // Prefer a fenced json block, else the whole trimmed text, else the first
-  // balanced {...} span.
+export function extractJsonObject(text) {
+  if (typeof text !== 'string' || text.trim() === '') return null
   const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const sources = [fence?.[1], text.trim()]
   const firstBrace = text.indexOf('{')
@@ -415,14 +410,25 @@ export function parseEditPlanReply(text, options = {}) {
     if (!src || typeof src !== 'string') continue
     try {
       const parsed = JSON.parse(src)
-      if (isPlainObject(parsed)) {
-        candidate = parsed
-        break
-      }
+      if (isPlainObject(parsed)) return parsed
     } catch {
       // try next source
     }
   }
+  return null
+}
+
+/**
+ * Parse a raw model reply (free text, often markdown-fenced) into a plan
+ * candidate. Extraction never throws: garbage is { ok: false }.
+ * The BOUNDED-REPAIR contract: `errors` are meant to be appended to the
+ * prompt on the retry turn.
+ */
+export function parseEditPlanReply(text, options = {}) {
+  if (typeof text !== 'string' || text.trim() === '') {
+    return { ok: false, errors: ['empty reply'] }
+  }
+  const candidate = extractJsonObject(text)
   if (!candidate) return { ok: false, errors: ['no JSON object found in reply'] }
   const check = validateEditPlan(candidate, options)
   if (!check.valid) return { ok: false, errors: check.errors }

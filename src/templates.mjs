@@ -983,7 +983,11 @@ export function createTemplateFromTimeline(timeline, meta = {}) {
     placeholders: meta.placeholders || placeholders,
     requiredAssets,
     createdAt: meta.createdAt || Date.now(),
-    isBuiltin: false
+    isBuiltin: false,
+    // §6.5 provenance label: "ai" for Template Plans, null/absent for the
+    // manual "save as template" path. Display metadata only — the builder
+    // sets it, validation never depends on it.
+    generatedBy: meta.generatedBy || null
   }
 
   return template
