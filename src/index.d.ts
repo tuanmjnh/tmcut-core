@@ -622,6 +622,124 @@ export function getAssetFolder<T extends object>(asset: T, projectId?: string): 
 export function filterAssetsByFolder<T extends object>(assets: T[], folderId?: string | null, projectId?: string): T[]
 export function getFolderCounts<T extends object>(folders: TmcutMediaFolder[], assets: T[], projectId?: string): TmcutFolderCounts
 
+// --- On-demand Asset Center (Roadmap v3 PART A) ---
+// Pure data model + queue state machine. Runtime adapters (Electron IPC)
+// do the downloading and file I/O; this module owns the state machine so
+// it can be unit-tested in plain Node. No Electron, no Node fs, no fetch.
+export const ASSET_CENTER_SCHEMA_VERSION: number
+
+export type AssetCenterInstallState = 'catalog' | 'downloading' | 'verifying' | 'installed' | 'error'
+export type AssetCenterDownloadState = 'queued' | 'active' | 'retrying' | 'done' | 'failed' | 'cancelled'
+export type AssetCenterLicenseStatus = 'approved' | 'review' | 'unknown'
+
+export interface AssetCenterLicense {
+  status: AssetCenterLicenseStatus
+  name: string
+  url: string
+  attribution: string
+  commercialUse: boolean
+  redistrbutable: boolean
+  territories: string[]
+  expiresAt: string | null
+  proof: string
+  reviewer: string | null
+  reviewedAt: string | null
+}
+
+export type AssetCenterSource =
+  | { type: 'remote', url: string }
+  | { type: 'sample', sampleId: string }
+  | { type: 'embedded', payload: Record<string, unknown> | null }
+
+export type AssetCenterAssetKind = 'media' | 'effect-preset' | 'title-preset'
+
+export interface AssetCenterCatalogEntry {
+  schemaVersion: number
+  id: string
+  title: string
+  description: string
+  category: string
+  assetKind: AssetCenterAssetKind
+  tags: string[]
+  version: string
+  sizeBytes: number
+  sha256: string
+  sourceUrl: string
+  source: AssetCenterSource
+  previewRef: string | null
+  creator: string
+  license: AssetCenterLicense
+}
+
+export interface AssetCenterInstalledAsset {
+  entryId: string
+  version: string
+  state: AssetCenterInstallState
+  installedAt: string | null
+  dir: string
+  files: string[]
+  sizeBytes: number
+  verified: boolean
+  sha256?: string
+  reason?: string | null
+}
+
+export interface AssetCenterInstallGate {
+  allowed: boolean
+  reason: string | null
+}
+
+export interface AssetCenterJob {
+  id: string
+  entryId: string
+  version: string
+  url: string
+  sha256: string
+  sizeBytes: number
+  state: AssetCenterDownloadState
+  progress: { loaded: number, total: number, percent: number }
+  attempts: number
+  maxRetries: number
+  delayMs: number
+  reason: string | null
+}
+
+export interface AssetCenterQueueSnapshot {
+  enqueue: (entry: AssetCenterCatalogEntry) => AssetCenterJob
+  startNext: () => AssetCenterJob | null
+  armRetry: (jobId: string) => AssetCenterJob | null
+  reportProgress: (jobId: string, loaded: number, total?: number) => AssetCenterJob | null
+  reportResult: (jobId: string, args: { ok: boolean, error?: string | null, verified: boolean }) => AssetCenterJob | null
+  cancel: (jobId: string) => AssetCenterJob | null
+  snapshot: () => AssetCenterJob[]
+  pendingCount: () => number
+  readonly concurrency: number
+}
+
+export interface AssetCenterStorageReport {
+  totalBytes: number
+  usableBytes: number
+  orphanBytes: number
+  reclaimableBytes: number
+  reclaimableIds: string[]
+  quotaBytes: number
+  quotaPct: number
+}
+
+export function createCatalogEntry(input?: Partial<AssetCenterCatalogEntry>): AssetCenterCatalogEntry
+export function normalizeLicense(license?: Partial<AssetCenterLicense> | null): AssetCenterLicense
+export function canInstall(entry: AssetCenterCatalogEntry | null | undefined, options?: { now?: number }): AssetCenterInstallGate
+export function createInstalledAsset(input?: Partial<AssetCenterInstalledAsset>): AssetCenterInstalledAsset
+export function transitionInstall(record: AssetCenterInstalledAsset, state: AssetCenterInstallState, extra?: Record<string, unknown>): AssetCenterInstalledAsset
+export function recoverInstallStates(installed: AssetCenterInstalledAsset[]): AssetCenterInstalledAsset[]
+export function createDownloadQueue(options?: {
+  concurrency?: number
+  maxRetries?: number
+  baseDelayMs?: number
+  maxDelayMs?: number
+}): AssetCenterQueueSnapshot
+export function storageReport(installed: AssetCenterInstalledAsset[], options?: { usedProjectIds?: string[], quotaBytes?: number }): AssetCenterStorageReport
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'
