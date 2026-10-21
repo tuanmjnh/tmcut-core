@@ -849,6 +849,26 @@ export function buildTemplateFromPlan(plan: AiTemplatePlan, options?: {
 
 export function summarizeTemplatePlan(plan: AiTemplatePlan | null | undefined): string[]
 
+// --- AutoCut plan bridge (Roadmap v3 Phase 7) ---
+// Converts the deterministic AutoCut EDL output into a standard Edit Plan
+// so AutoCut and the AI Editor share ONE validated apply path.
+export interface AutocutCaptionLine {
+  start: number
+  end: number
+  text?: string
+}
+
+export function editPlanFromEdl(
+  edl: TmcutEdl,
+  segments: TmcutEdlSegment[] | null | undefined,
+  options?: {
+    mediaRef?: string
+    name?: string
+    intentSummary?: string
+    captions?: AutocutCaptionLine[]
+  }
+): { plan: AiEditPlan, warnings: string[] }
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'
