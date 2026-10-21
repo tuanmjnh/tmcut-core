@@ -8,10 +8,13 @@ import {
   recoverInstallStates,
   createDownloadQueue,
   storageReport,
+  parseEntitlements,
+  hasLiveEntitlement,
   INSTALL_STATES,
   DOWNLOAD_STATES,
   LICENSE_STATUS,
-  ASSET_CENTER_SCHEMA_VERSION
+  ASSET_CENTER_SCHEMA_VERSION,
+  ENTITLEMENT_SCHEMA_VERSION
 } from '../src/assetCenter.mjs'
 
 function entry(overrides = {}) {
@@ -206,5 +209,64 @@ describe('storage accounting (protect pinned projects on cleanup)', () => {
     assert.deepEqual(report.reclaimableIds, ['a'])
     assert.equal(report.reclaimableBytes, 100)
     assert.equal(report.quotaPct, 60)
+  })
+})
+
+describe('entitlements for paid assets (Roadmap v3 §26)', () => {
+  const NOW = Date.parse('2026-10-21T00:00:00Z')
+  const liveGrant = {
+    entryId: 'asset_premium_001',
+    version: '1.0.0',
+    grantedAt: '2026-10-01T00:00:00.000Z',
+    expiresAt: '2027-01-01T00:00:00.000Z',
+    signature: 'sig-1'
+  }
+
+  it('parseEntitlements drops malformed grants, keeps clean ones', () => {
+    const parsed = parseEntitlements({ grants: [liveGrant, null, { version: 'x' }, 'junk'] })
+    assert.equal(parsed.length, 1)
+    assert.equal(parsed[0].entryId, 'asset_premium_001')
+    assert.equal(parsed[0].signature, 'sig-1')
+    // A bare array is also accepted (catalog payload variant).
+    assert.equal(parseEntitlements([liveGrant]).length, 1)
+    assert.deepEqual(parseEntitlements(null), [])
+    assert.equal(ENTITLEMENT_SCHEMA_VERSION, 1)
+  })
+
+  it('hasLiveEntitlement: entry match, version match, expiry', () => {
+    assert.equal(hasLiveEntitlement('asset_premium_001', '1.0.0', [liveGrant], NOW), true)
+    // Empty grant version = wildcard version.
+    assert.equal(hasLiveEntitlement('asset_premium_001', '2.0.0', [{ ...liveGrant, version: '' }], NOW), true)
+    assert.equal(hasLiveEntitlement('other', '1.0.0', [liveGrant], NOW), false)
+    const expired = { ...liveGrant, expiresAt: '2026-01-01T00:00:00.000Z' }
+    assert.equal(hasLiveEntitlement('asset_premium_001', '1.0.0', [expired], NOW), false)
+    assert.equal(hasLiveEntitlement('asset_premium_001', '1.0.0', [], NOW), false)
+  })
+
+  it('paid entry without a grant is blocked; with a live grant it passes', () => {
+    const paid = entry({ id: 'asset_premium_001', priceUsd: 4.5, version: '1.0.0' })
+    assert.equal(paid.priceUsd, 4.5)
+    const blocked = canInstall(paid, { now: NOW })
+    assert.equal(blocked.allowed, false)
+    assert.equal(blocked.reason, 'entitlement-missing')
+    const allowed = canInstall(paid, { now: NOW, entitlements: [liveGrant] })
+    assert.equal(allowed.allowed, true)
+    assert.equal(allowed.reason, null)
+  })
+
+  it('free entries ignore entitlements entirely', () => {
+    const free = entry()
+    assert.equal(free.priceUsd, 0)
+    assert.equal(canInstall(free, { now: NOW }).allowed, true)
+  })
+
+  it('the download queue blocks paid enqueues without a grant (static + getter)', () => {
+    const paid = entry({ id: 'asset_premium_001', priceUsd: 9, version: '1.0.0' })
+    const q1 = createDownloadQueue({ entitlements: null })
+    assert.equal(q1.enqueue(paid).state, DOWNLOAD_STATES.cancelled)
+    const q2 = createDownloadQueue({ entitlements: () => [liveGrant] })
+    const job = q2.enqueue(paid)
+    assert.equal(job.state, DOWNLOAD_STATES.queued)
+    assert.equal(job.reason, null)
   })
 })

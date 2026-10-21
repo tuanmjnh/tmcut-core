@@ -668,6 +668,7 @@ export interface AssetCenterCatalogEntry {
   source: AssetCenterSource
   previewRef: string | null
   creator: string
+  priceUsd: number
   license: AssetCenterLicense
 }
 
@@ -727,8 +728,18 @@ export interface AssetCenterStorageReport {
 }
 
 export function createCatalogEntry(input?: Partial<AssetCenterCatalogEntry>): AssetCenterCatalogEntry
+export function canInstall(entry: AssetCenterCatalogEntry | null | undefined, options?: { now?: number, entitlements?: unknown[] | null }): AssetCenterInstallGate
+export interface AssetEntitlement {
+  entryId: string
+  version: string
+  grantedAt: string | null
+  expiresAt: string | null
+  signature: string
+}
+export const ENTITLEMENT_SCHEMA_VERSION: number
+export function parseEntitlements(raw: unknown): AssetEntitlement[]
+export function hasLiveEntitlement(entryId: string, version: string | '', entitlements: unknown, now?: number): boolean
 export function normalizeLicense(license?: Partial<AssetCenterLicense> | null): AssetCenterLicense
-export function canInstall(entry: AssetCenterCatalogEntry | null | undefined, options?: { now?: number }): AssetCenterInstallGate
 export function createInstalledAsset(input?: Partial<AssetCenterInstalledAsset>): AssetCenterInstalledAsset
 export function transitionInstall(record: AssetCenterInstalledAsset, state: AssetCenterInstallState, extra?: Record<string, unknown>): AssetCenterInstalledAsset
 export function recoverInstallStates(installed: AssetCenterInstalledAsset[]): AssetCenterInstalledAsset[]
@@ -737,6 +748,7 @@ export function createDownloadQueue(options?: {
   maxRetries?: number
   baseDelayMs?: number
   maxDelayMs?: number
+  entitlements?: AssetEntitlement[] | null | (() => AssetEntitlement[] | null)
 }): AssetCenterQueueSnapshot
 export function storageReport(installed: AssetCenterInstalledAsset[], options?: { usedProjectIds?: string[], quotaBytes?: number }): AssetCenterStorageReport
 

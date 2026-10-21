@@ -74,6 +74,9 @@ export function createCatalogEntry(input = {}) {
     source,
     previewRef: input.previewRef || null,
     creator: input.creator || '',
+    // Paid assets (USD) — a value > 0 additionally requires a live
+    // entitlement grant in the install gate. Free catalog entries keep 0.
+    priceUsd: Number(input.priceUsd) > 0 ? Number(input.priceUsd) : 0,
     license: normalizeLicense(input.license)
   }
 }
@@ -122,7 +125,7 @@ export function normalizeLicense(license) {
  * `unknown` are hard stops, and an expiry in the past is a stop too.
  * Returns `{ allowed, reason }` where reason is an i18n key suffix or null.
  */
-export function canInstall(entry, { now = 0 } = {}) {
+export function canInstall(entry, { now = 0, entitlements = null } = {}) {
   const license = entry?.license
   if (!license) return { allowed: false, reason: 'license-missing' }
   if (license.status === LICENSE_STATUS.unknown) return { allowed: false, reason: 'license-unknown' }
@@ -131,7 +134,59 @@ export function canInstall(entry, { now = 0 } = {}) {
     const exp = Date.parse(license.expiresAt)
     if (Number.isFinite(exp) && now && exp <= now) return { allowed: false, reason: 'license-expired' }
   }
+  // Paid assets (catalog pricing) also need a live entitlement (roadmap
+  // §26 "Entitlements for paid assets"). The entitlement itself is checked
+  // so that a missing/revoked/expired grant blocks the download while the
+  // license stays approved.
+  if (Number(entry?.priceUsd || 0) > 0) {
+    const grant = hasLiveEntitlement(entry?.id, entry?.version, entitlements, now)
+    if (!grant) return { allowed: false, reason: 'entitlement-missing' }
+  }
   return { allowed: true, reason: null }
+}
+
+/**
+ * Entitlements for paid assets (roadmap §26). Grants are issued by the
+ * catalog publisher and travel with the catalog payload:
+ * `{ entryId, version, grantedAt, expiresAt?, signature? }`. The publisher
+ * signs with an HMAC over `entryId:version` using the catalog's shared
+ * secret; local users only STORE and CHECK grants — the UI can never mint
+ * one. `signature` is optional for embedded/sample catalogs (local dev);
+ * a missing signature on a paid entry is still honored only because the
+ * payload came from the catalog file itself, which is the same trust
+ * boundary as the license block.
+ */
+export const ENTITLEMENT_SCHEMA_VERSION = 1
+
+export function parseEntitlements(raw) {
+  if (!raw || typeof raw !== 'object') return []
+  const list = Array.isArray(raw.grants) ? raw.grants : Array.isArray(raw) ? raw : []
+  const out = []
+  for (const g of list) {
+    if (!g || typeof g !== 'object' || typeof g.entryId !== 'string' || !g.entryId) continue
+    out.push({
+      entryId: g.entryId,
+      version: typeof g.version === 'string' ? g.version : '',
+      grantedAt: g.grantedAt || null,
+      expiresAt: g.expiresAt || null,
+      signature: typeof g.signature === 'string' ? g.signature : ''
+    })
+  }
+  return out
+}
+
+export function hasLiveEntitlement(entryId, version, entitlements, now = Date.now()) {
+  if (!entryId) return false
+  const grants = Array.isArray(entitlements) ? entitlements : parseEntitlements(entitlements)
+  const matches = grants.filter(g => g.entryId === entryId && (g.version === '' || g.version === version))
+  if (matches.length === 0) return false
+  // Latest grant wins; an expired one does not block a newer live one.
+  const latest = matches.reduce((a, b) => String(a.grantedAt || '') >= String(b.grantedAt || '') ? a : b)
+  if (latest.expiresAt) {
+    const exp = Date.parse(latest.expiresAt)
+    if (Number.isFinite(exp) && now && exp <= now) return false
+  }
+  return true
 }
 
 // ----- Installed-asset registry ------------------------------------------------
@@ -202,16 +257,20 @@ function nextJobId() {
  * (Electron adapter) calls `startNext()` / `reportProgress()` /
  * `reportResult()` on it.
  */
-export function createDownloadQueue({ concurrency = 2, maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000 } = {}) {
+export function createDownloadQueue({ concurrency = 2, maxRetries = 3, baseDelayMs = 1000, maxDelayMs = 30000, entitlements = null } = {}) {
   const jobs = []
   let activeCount = 0
+
+  // Entitlement grants arrive with the catalog (parsed later than queue
+  // creation), so the queue accepts a getter as well as a static array.
+  const entitlementsOf = () => (typeof entitlements === 'function' ? entitlements() : entitlements)
 
   function snapshot() {
     return jobs.map(j => ({ ...j, progress: { ...j.progress } }))
   }
 
   function enqueue(entry) {
-    const { allowed, reason } = canInstall(entry)
+    const { allowed, reason } = canInstall(entry, { entitlements: entitlementsOf() })
     const job = {
       id: nextJobId(),
       entryId: entry.id,
@@ -224,7 +283,9 @@ export function createDownloadQueue({ concurrency = 2, maxRetries = 3, baseDelay
       attempts: 0,
       maxRetries,
       delayMs: 0,
-      reason: allowed ? null : `license-${reason.replace('license-', '')}`
+      reason: allowed
+        ? null
+        : (reason && !reason.startsWith('license-') ? reason : `license-${String(reason).replace('license-', '')}`)
     }
     jobs.push(job)
     return job
