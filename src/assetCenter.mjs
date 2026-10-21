@@ -77,6 +77,9 @@ export function createCatalogEntry(input = {}) {
     // Paid assets (USD) — a value > 0 additionally requires a live
     // entitlement grant in the install gate. Free catalog entries keep 0.
     priceUsd: Number(input.priceUsd) > 0 ? Number(input.priceUsd) : 0,
+    // How grants get issued for a paid entry (publishing audit — the
+    // install gate never trusts this field, only the grants themselves).
+    salesChannel: typeof input.salesChannel === 'string' ? input.salesChannel : '',
     license: normalizeLicense(input.license)
   }
 }
@@ -115,7 +118,18 @@ export function normalizeLicense(license) {
     expiresAt: license.expiresAt || null,
     proof: typeof license.proof === 'string' ? license.proof : '',
     reviewer: typeof license.reviewer === 'string' ? license.reviewer : null,
-    reviewedAt: license.reviewedAt || null
+    reviewedAt: license.reviewedAt || null,
+    // Review-decision audit trail (catalogPublish.stampLicenseReview):
+    // { decision, by, at, note }. Survives normalization so the decision
+    // travels with the published document.
+    review: license.review && typeof license.review === 'object'
+      ? {
+          decision: license.review.decision === 'rejected' ? 'rejected' : 'approved',
+          by: typeof license.review.by === 'string' ? license.review.by : '',
+          at: license.review.at || null,
+          note: typeof license.review.note === 'string' ? license.review.note.slice(0, 512) : ''
+        }
+      : null
   }
 }
 

@@ -632,6 +632,13 @@ export type AssetCenterInstallState = 'catalog' | 'downloading' | 'verifying' | 
 export type AssetCenterDownloadState = 'queued' | 'active' | 'retrying' | 'done' | 'failed' | 'cancelled'
 export type AssetCenterLicenseStatus = 'approved' | 'review' | 'unknown'
 
+export interface AssetCenterLicenseReviewRecord {
+  decision: 'approved' | 'rejected'
+  by: string
+  at: string | null
+  note: string
+}
+
 export interface AssetCenterLicense {
   status: AssetCenterLicenseStatus
   name: string
@@ -644,6 +651,7 @@ export interface AssetCenterLicense {
   proof: string
   reviewer: string | null
   reviewedAt: string | null
+  review: AssetCenterLicenseReviewRecord | null
 }
 
 export type AssetCenterSource =
@@ -669,6 +677,7 @@ export interface AssetCenterCatalogEntry {
   previewRef: string | null
   creator: string
   priceUsd: number
+  salesChannel: string
   license: AssetCenterLicense
 }
 
@@ -958,6 +967,21 @@ export function takedownAudit(
   registry: unknown,
   options?: { now?: number }
 ): Array<{ entryId: string, state: string, notice: TakedownNotice }>
+
+// --- Catalog admin publishing workflow (Roadmap v3 §26) ---
+// Pre-publish validation the app runs on catalog documents, plus the
+// human license-review stamp that forms the audit trail.
+export const CATALOG_PUBLISH_SCHEMA_VERSION: number
+export function validateCatalogEntry(entry: unknown): string[]
+export function validateCatalogDocument(doc: unknown): {
+  ok: boolean
+  errors: string[]
+  stats: { entries: number, publishable: number }
+}
+export function stampLicenseReview(
+  entry: AssetCenterCatalogEntry | Record<string, unknown>,
+  options: { reviewer: string, reviewedAt?: string, approve: boolean, note?: string, proof?: string }
+): AssetCenterCatalogEntry
 
 // --- Generation adapter interface (Roadmap v3 §25 Phase 9) ---
 // Contract for image/video generation providers. No provider is implemented
