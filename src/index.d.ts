@@ -916,6 +916,37 @@ export function mergeAudioProvenance(
   additions: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>>
 
+// --- Asset takedown & license audit (Roadmap v3 §26, local scope) ---
+// Catalog-delivered takedown notices: block installs, audit installed
+// copies, never delete user data silently. Registry is plain JSON.
+export interface TakedownNotice {
+  entryId: string
+  reason: 'license-revoked' | 'rights-claim' | 'policy-violation' | 'recall'
+  ref: string
+  issuedAt: number
+  effectiveFrom: number
+}
+
+export interface TakedownRegistry {
+  schemaVersion: number
+  notices: TakedownNotice[]
+}
+
+export function normalizeTakedownNotice(input: unknown): TakedownNotice | null
+export function parseTakedownRegistry(raw: unknown): TakedownRegistry
+export function mergeTakedownRegistry(registry: unknown, incoming: unknown): TakedownRegistry
+export function findActiveTakedown(registry: unknown, entryId: string, now?: number): TakedownNotice | null
+export function canServeAfterTakedown(
+  registry: unknown,
+  entryId: string,
+  options?: { now?: number }
+): { allowed: boolean, reason: string | null, notice: TakedownNotice | null }
+export function takedownAudit(
+  installed: Array<{ entryId?: string, state?: string }> | null | undefined,
+  registry: unknown,
+  options?: { now?: number }
+): Array<{ entryId: string, state: string, notice: TakedownNotice }>
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'
