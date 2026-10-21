@@ -869,6 +869,53 @@ export function editPlanFromEdl(
   }
 ): { plan: AiEditPlan, warnings: string[] }
 
+// --- Audio orchestration (Roadmap v3 Phase 8) ---
+// Deterministic planners that turn a timeline shape + rights-cleared audio
+// candidates into standard Edit Plan operations (music beds, SFX cues)
+// plus the provenance record every audio element must carry.
+export interface AudioCandidate {
+  mediaRef: string
+  name?: string
+  source?: string | null
+  origin?: 'library' | 'asset-center' | 'generated' | null
+  licenseStatus?: 'approved' | 'review' | 'blocked' | 'unknown'
+  licenseName?: string
+  attribution?: string
+  durationTicks?: number
+  addedAt?: number
+}
+
+export function rankAudioCandidates(
+  candidates?: AudioCandidate[],
+  options?: { allowGenerated?: boolean }
+): AudioCandidate[]
+
+export function planMusicBed(
+  candidates: AudioCandidate[],
+  context: { durationTicks: number, dialoguePresent?: boolean },
+  options?: {
+    bedVolume?: number
+    fadeInTicks?: number
+    fadeOutTicks?: number
+  }
+): { operations: AiEditOperation[], provenance: Array<Record<string, unknown>> }
+
+export function planSfxCues(
+  candidates: AudioCandidate[],
+  cues: Array<{ atTicks: number, name?: string }>,
+  context: { durationTicks: number },
+  options?: { minGapTicks?: number, cueVolume?: number }
+): {
+  operations: AiEditOperation[]
+  provenance: Array<Record<string, unknown>>
+  skipped: Array<{ atTicks: number, name: string, reason: string }>
+}
+
+export function mergeAudioProvenance(
+  existing: Array<Record<string, unknown>> | null | undefined,
+  additions: Array<Record<string, unknown>>
+): Array<Record<string, unknown>>
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'

@@ -184,6 +184,17 @@ export function validateEditPlan(plan, options = {}) {
         if (op.in !== undefined) nonNegativeFiniteNumber(op.in, `${where}.in`, errors, 10 * 3600 * TICKS_PER_SECOND)
         if (op.out !== undefined) nonNegativeFiniteNumber(op.out, `${where}.out`, errors, 10 * 3600 * TICKS_PER_SECOND)
         if (op.offset !== undefined) nonNegativeFiniteNumber(op.offset, `${where}.offset`, errors, 10 * 3600 * TICKS_PER_SECOND)
+        if (op.volume !== undefined && (typeof op.volume !== 'number' || !Number.isFinite(op.volume) || op.volume < 0 || op.volume > 400)) {
+          errors.push(`${where}.volume must be a number in [0, 400]`)
+        }
+        if (op.fade !== undefined) {
+          if (!isPlainObject(op.fade)) {
+            errors.push(`${where}.fade must be an object with optional in/out ticks`)
+          } else {
+            if (op.fade.in !== undefined) nonNegativeFiniteNumber(op.fade.in, `${where}.fade.in`, errors, TICKS_PER_SECOND * 60)
+            if (op.fade.out !== undefined) nonNegativeFiniteNumber(op.fade.out, `${where}.fade.out`, errors, TICKS_PER_SECOND * 60)
+          }
+        }
         if (op.fontSize !== undefined) positiveFiniteNumber(op.fontSize, `${where}.fontSize`, errors, 1024)
         if (op.color !== undefined && (typeof op.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(op.color))) {
           errors.push(`${where}.color must be a #rrggbb string`)
@@ -315,6 +326,10 @@ export function applyEditPlan(timeline, plan, options = {}) {
             in: op.in ?? 0,
             out: op.out ?? 5 * TICKS_PER_SECOND,
             offset: op.offset,
+            // Phase 8: music beds / SFX carry loudness + fades on the op;
+            // validateEditPlan already range-checked both.
+            volume: op.volume,
+            fade: op.fade,
             effects: op.effects ? normalizeEffects(op.effects) : undefined
           })
           if (!clip) { step.ok = false; step.reason = 'track-locked' }
