@@ -947,6 +947,139 @@ export function takedownAudit(
   options?: { now?: number }
 ): Array<{ entryId: string, state: string, notice: TakedownNotice }>
 
+// --- Generation adapter interface (Roadmap v3 §25 Phase 9) ---
+// Contract for image/video generation providers. No provider is implemented
+// until its official API is verified (roadmap rule 12).
+export interface GenerationCapabilityManifest {
+  schemaVersion: number
+  providerId: string
+  displayName: string
+  modalities: ('image' | 'video')[]
+  outputFormats: { image: string[], video: string[] }
+  maxResolution: { image: { width: number, height: number }, video: { width: number, height: number } }
+  maxDurationSec: number
+  supportsAsync: boolean
+  supportsCancel: boolean
+  supportsProgress: boolean
+  costModel: 'per-second' | 'per-image' | 'per-credit' | 'subscription'
+  estimatedCostPerUnit: number
+  costUnit: 'second' | 'image' | 'credit'
+  rights: { commercialUse: boolean, attributionRequired: boolean, license: string, redistributable: boolean }
+  privacy: { trainsOnUserData: boolean, dataRetentionDays: number, loggingLevel: 'none' | 'metadata' | 'full' }
+  rateLimitRpm: number
+  verified: boolean
+}
+
+export interface GenerationJobInput {
+  taskType: 'text-to-image' | 'image-to-image' | 'text-to-video' | 'image-to-video'
+  prompt: string
+  inputMediaRef: string | null
+  params: Record<string, unknown>
+  negativePrompt: string
+  seed: number | null
+}
+
+export interface GenerationJobStatus {
+  jobId: string
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled'
+  progress: number
+  results: GenerationResult[]
+  error: string | null
+  etaSec: number | null
+  costSoFar: number
+}
+
+export interface GenerationResult {
+  resultId: string
+  type: 'image' | 'video'
+  downloadUrl: string
+  mimeType: string
+  width: number
+  height: number
+  durationSec: number
+  cost: number
+  metadata: Record<string, unknown>
+}
+
+export interface GenerationCostEstimate {
+  estimatedCostUsd: number
+  costBreakdown: Record<string, unknown>
+  budgetWarning: boolean
+}
+
+export interface GenerationAdapter {
+  manifest(): GenerationCapabilityManifest
+  submitJob(input: GenerationJobInput): Promise<string> // returns jobId
+  pollJob(jobId: string): Promise<GenerationJobStatus>
+  cancelJob(jobId: string): Promise<boolean>
+  downloadResult(jobId: string, destDir: string): Promise<{ files: string[], metadata: GenerationResult[] }>
+  estimateCost(input: GenerationJobInput): Promise<GenerationCostEstimate>
+}
+
+export function createCapabilityManifest(input?: Record<string, unknown>): GenerationCapabilityManifest
+export function validateCapabilityManifest(manifest: unknown): { valid: boolean, errors: string[] }
+export function createGenerationJobInput(input?: Record<string, unknown>): GenerationJobInput
+export function createJobStatusResponse(input?: Record<string, unknown>): GenerationJobStatus
+export function createGenerationResult(input?: Record<string, unknown>): GenerationResult
+export function createCostEstimate(input?: Record<string, unknown>): GenerationCostEstimate
+export function registerGenerationAdapter(providerId: string, adapter: GenerationAdapter): void
+export function getGenerationAdapter(providerId: string): GenerationAdapter | null
+export function listGenerationAdapters(): Array<{ providerId: string, manifest: GenerationCapabilityManifest }>
+export function isProviderVerified(providerId: string): boolean
+
+export const GENERATION_JOB_STATUS: { pending: 'pending', processing: 'processing', completed: 'completed', failed: 'failed', cancelled: 'cancelled' }
+
+// --- Usage & cost limits tracker (Roadmap v3 §26 Phase 10) ---
+export function recordAiUsage(tokens: number, options?: { provider?: string, model?: string, projectId?: string | null }): void
+export function recordGenerationCost(costUsd: number, options?: { provider?: string, projectId?: string | null }): void
+export function recordAssetDownload(bytes: number): void
+export function recordExport(options?: { durationSec?: number, projectId?: string | null }): void
+export function getUsageSummary(limits?: Record<string, number>): {
+  month: string
+  aiTokens: number
+  aiTokensLimit: number
+  aiTokensPct: number
+  generationCostUsd: number
+  generationCostLimitUsd: number
+  generationCostPct: number
+  assetDownloadGb: number
+  assetDownloadLimitGb: number
+  assetDownloadPct: number
+  exports: number
+  byProvider: Record<string, { tokens: number, costUsd: number, calls: number }>
+}
+export function checkLimit(action: 'ai-tokens' | 'generation-cost' | 'asset-download', limits?: Record<string, number>): { allowed: boolean, reason: string | null, current: number, limit: number }
+export function resetUsageStore(): void
+export function exportUsageData(): Record<string, unknown>
+
+// --- Telemetry with privacy controls (Roadmap v3 §26 Phase 10) ---
+export function isTelemetryEnabled(): boolean
+export function setTelemetryEnabled(enabled: boolean): void
+export function recordTelemetryEvent(category: string, action: string, metadata?: Record<string, unknown>): void
+export function getTelemetryEvents(): Array<Record<string, unknown>>
+export function clearTelemetryEvents(): void
+export function generateTelemetryReport(appVersion?: string): {
+  schemaVersion: number
+  generatedAt: number
+  appVersion: string
+  eventCount: number
+  events: Array<Record<string, unknown>>
+  summary: Record<string, number>
+}
+export const TELEMETRY_CATEGORIES: Record<string, string>
+export const TELEMETRY_ACTIONS: Record<string, string[]>
+
+// --- Crash recovery & support diagnostics (Roadmap v3 §26 Phase 10) ---
+export function checkpointRecovery(state: Record<string, unknown>): void
+export function getLastCheckpoint(): { timestamp: number, version: string, projectId: string | null, projectName: string | null, canvas: { width: number, height: number, fps: number } | null, timelineDurationMs: number, trackCount: number, clipCount: number, unsavedChanges: boolean, lastAction: string | null, activeTab: string, playheadPosition: number } | null
+export function clearRecoveryCheckpoint(): void
+export function recordCrash(error: Error, context?: Record<string, unknown>): void
+export function getCrashLog(): Array<{ timestamp: number, version: string, message: string, stack: string | null, context: Record<string, unknown> }>
+export function clearCrashLog(): void
+export async function runHealthChecks(): Promise<{ checks: Array<{ name: string, status: 'ok' | 'warn' | 'fail', detail: string }>, summary: { ok: number, warn: number, fail: number, overall: 'ok' | 'warn' | 'fail' } }>
+export function generateSupportBundle(appVersion?: string): Record<string, unknown>
+export function getRecoveryManifest(): { hasCheckpoint: boolean, canRecover: boolean, projectName: string | null, projectId: string | null, canvas: { width: number, height: number, fps: number } | null, timelineDurationMs: number, clipCount: number, unsavedChanges: boolean, lastAction: string | null, ageMinutes: number }
+
 export type TmcutTemplateCategory
   = | 'intro'
     | 'outro'
