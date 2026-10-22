@@ -593,6 +593,16 @@ export function isRetimed(clip: { speed?: number, reverse?: boolean } | null | u
 export function timelineToSource(clip: { in?: number, out?: number, speed?: number, reverse?: boolean } | null | undefined, atTicks: number): number
 export function sourceToTimeline(clip: { in?: number, out?: number, speed?: number, reverse?: boolean } | null | undefined, sourceTicks: number): number
 export function withSpeed<T extends { in?: number, out?: number, speed?: number }>(clip: T | null | undefined, speed: number): T & { speed: number, out: number }
+// Speed ramping (R124 A4): clip-local TICKS control points; speedPoints
+// turns `speed` into a piecewise-linear curve. Times are timeline ticks.
+export interface TmcutSpeedPoint { t: number, speed: number }
+export function isRamped(clip: { speedPoints?: TmcutSpeedPoint[] | null } | null | undefined): boolean
+export function speedAt(clip: { speed?: number, speedPoints?: TmcutSpeedPoint[] | null } | null | undefined, atTicks: number): number
+export function rampIntegral(clip: { speed?: number, speedPoints?: TmcutSpeedPoint[] | null } | null | undefined, toTicks: number): number
+export function rampTimelineToSource(clip: { in?: number, out?: number, speed?: number, reverse?: boolean, speedPoints?: TmcutSpeedPoint[] | null } | null | undefined, atTicks: number): number
+export const SPEED_RAMP_PRESETS: string[]
+export function buildRampPreset(kind: string, durationTicks: number, baseSpeed?: number): TmcutSpeedPoint[]
+export function rampSetptsExpr(clip: { speedPoints?: TmcutSpeedPoint[] | null } | null | undefined, uVariable?: string): string | null
 
 // --- Effects registry + normalize (Roadmap C6) ---
 // First wave: blur, sharpen, vignette, grain, chromakey, lut3d, stabilize,
