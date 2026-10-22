@@ -561,6 +561,13 @@ export function maskAlphaExpr(mask: (Partial<TmcutMask> & { shape?: string | nul
  */
 export function maskCssMaskImage(mask: (Partial<TmcutMask> & { shape?: string | null }) | null | undefined, wPx?: number, hPx?: number): string | null
 
+// --- Sticker catalog (R124 A6, CapCut §3.4) ---
+// Curated emoji groups rendered as text-track graphic layers.
+export interface TmcutStickerGroup { id: string, emojis: string[] }
+export const STICKER_GROUPS: TmcutStickerGroup[]
+export function allStickers(): string[]
+export function stickerMatches(query: string | null | undefined, emoji: string): boolean
+
 // --- Transitions: overlap model (Roadmap C5) ---
 // `transitionIn.duration` is TIMELINE TICKS (120000/s); applying shifts the
 // clip left by that amount so its head overlaps the neighbor's tail.
