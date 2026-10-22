@@ -88,3 +88,42 @@ export function volumeExpr(clip) {
   if (inSec > 0) return `if(lt(t,${fmt(inSec)}),t/${fmt(inSec)},1)`
   return `if(gt(t,${fmt(durationSec - outSec)}),(${fmt(durationSec)}-t)/${fmt(outSec)},1)`
 }
+
+/**
+ * Pan / Balance (CapCut §5.3, Roadmap R124 A1): a single -100..100
+ * control that shifts stereo gain between left and right. 0 = dead centre,
+ * -100 = full left (right silent), +100 = full right (left silent).
+ *
+ * The mapping is the classic linear split: L = (1 - pan)/2, R = (1 + pan)/2
+ * so the TOTAL energy stays constant across the pan range (a hard left
+ * does not double the perceived loudness — it only moves it). The output
+ * is an FFmpeg `stereotools` filter string; `pan` is a separate filter
+ * and is NOT emitted here because `stereotools` is the one that keeps the
+ * two channels' gains independent of the input channel count.
+ *
+ * @param {number} pan -100..100
+ * @returns {string} empty string when pan == 0 (no-op), otherwise the
+ *   `stereotools=...` filter string.
+ */
+export function panFilter(pan) {
+  const p = Number(pan)
+  if (!Number.isFinite(p) || p === 0) return ''
+  const v = Math.max(-1, Math.min(1, p / 100))
+  const l = Number((1 - v) / 2).toFixed(4)
+  const r = Number((1 + v) / 2).toFixed(4)
+  return `stereotools=level_in=${l}:level_out=${r}`
+}
+
+/**
+ * Track-level mute (CapCut-style track header toggle, Roadmap R124 A1).
+ * Mute is a TRACK property, not a clip one — it silences every clip on
+ * that track at mix time. The render layer decides how to express it
+ * (volume=0 on the track's bus, or skipping the track's inputs entirely);
+ * this helper is the single source of truth for "is this track silent".
+ *
+ * @param {{ muted?: boolean }} track
+ * @returns {boolean}
+ */
+export function isTrackMuted(track) {
+  return !!track?.muted
+}

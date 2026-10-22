@@ -265,6 +265,9 @@ export type CoreFadeClip = TmcutTimelineClip | {
 export function fadeDuration(clip: CoreFadeClip, edge: TmcutClipFadeEdge): number
 export function gainAt(clip: CoreFadeClip, atTicks: number): number
 export function volumeExpr(clip: CoreFadeClip): string
+// --- R124 A1: track-level audio (CapCut §5.3) ---
+export function panFilter(pan: number): string
+export function isTrackMuted(track: { muted?: boolean } | null | undefined): boolean
 
 // --- Frame plan: filmstrip / thumbnail timestamps (Roadmap C14) ---
 // Core maths tick lists only; FFmpeg -ss stays in the Electron extractor.
