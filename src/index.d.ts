@@ -520,6 +520,47 @@ export function propsWithKeyframes(clip: { keyframes?: TmcutKeyframe[] } | null 
 export function keyframeTimes(clip: { keyframes?: TmcutKeyframe[] } | null | undefined, prop: string): number[]
 export function keyframeExpr(clip: { keyframes?: TmcutKeyframe[] } | null | undefined, prop: string, timeVar?: string): string | null
 
+// --- Masks (R124 A3, CapCut 5.7) ---
+export type TmcutMaskShape = 'rectangle' | 'circle' | 'linear'
+export type TmcutMaskAxis = 'x' | 'y'
+
+export const TMUTCUT_MASK_SHAPES: TmcutMaskShape[]
+
+/** Full normalized mask geometry. `x/y/w/h` are 0..1 of the clip frame. */
+export interface TmcutMask {
+  shape: TmcutMaskShape
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Soft-edge width 0..100 (0 = hard border). */
+  feather: number
+  /** Degrees around the box center, -180..180. */
+  rotation: number
+  /** Show OUTSIDE the shape instead of inside. */
+  invert: boolean
+  /** 'linear' only: axis the gradient runs along. */
+  axis: TmcutMaskAxis
+}
+
+/** Partial mask as stored on a clip; null shape or absent mask = no mask. */
+export type TmcutMaskInput = Partial<TmcutMask> & { shape: TmcutMaskShape }
+
+/** Sanitized geometry or null when the mask is absent/unknown shape. */
+export function normalizeMask(mask: (Partial<TmcutMask> & { shape?: string | null }) | null | undefined): TmcutMask | null
+
+/**
+ * FFmpeg `geq` alpha expression (0..255) for the mask. Contains commas —
+ * the caller must wrap it in single quotes inside the geq filter.
+ */
+export function maskAlphaExpr(mask: (Partial<TmcutMask> & { shape?: string | null }) | null | undefined): string
+
+/**
+ * CSS `mask-image` SVG data-URI for the browser preview (authored in the
+ * given pixel aspect so rotation is not distorted). Null without a mask.
+ */
+export function maskCssMaskImage(mask: (Partial<TmcutMask> & { shape?: string | null }) | null | undefined, wPx?: number, hPx?: number): string | null
+
 // --- Transitions: overlap model (Roadmap C5) ---
 // `transitionIn.duration` is TIMELINE TICKS (120000/s); applying shifts the
 // clip left by that amount so its head overlaps the neighbor's tail.
