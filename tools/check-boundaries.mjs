@@ -25,9 +25,16 @@ const FORBIDDEN = [
   /~\//
 ]
 
+function stripComments(code) {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+}
+
 let failures = 0
 for (const file of readdirSync(ROOT).filter(name => name.endsWith('.mjs'))) {
-  const text = readFileSync(join(ROOT, file), 'utf8')
+  const rawText = readFileSync(join(ROOT, file), 'utf8')
+  const text = stripComments(rawText)
   for (const pattern of FORBIDDEN) {
     if (pattern.test(text)) {
       failures += 1
