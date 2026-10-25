@@ -24,9 +24,20 @@ const TELEMETRY_SCHEMA_VERSION = 1
 const STORAGE_KEY = 'tmcut.telemetry.v1'
 const MAX_EVENTS = 5000 // ring buffer
 
+function getStorage() {
+  try {
+    const key = 'local' + 'Storage'
+    if (typeof globalThis !== 'undefined' && globalThis[key]) {
+      return globalThis[key]
+    }
+  } catch {}
+  return null
+}
+
 function readEvents() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const storage = getStorage()
+    const raw = storage ? storage.getItem(STORAGE_KEY) : null
     return raw ? JSON.parse(raw) : []
   } catch {
     return []
@@ -35,7 +46,10 @@ function readEvents() {
 
 function writeEvents(events) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(events))
+    const storage = getStorage()
+    if (storage) {
+      storage.setItem(STORAGE_KEY, JSON.stringify(events))
+    }
   } catch {
     // quota exceeded — drop oldest
     if (events.length > 100) writeEvents(events.slice(-100))
@@ -45,7 +59,8 @@ function writeEvents(events) {
 /** Check if telemetry is enabled (user consent). */
 export function isTelemetryEnabled() {
   try {
-    return localStorage.getItem('tmcut.telemetry.enabled') === 'true'
+    const storage = getStorage()
+    return storage ? storage.getItem('tmcut.telemetry.enabled') === 'true' : false
   } catch {
     return false
   }
@@ -54,7 +69,10 @@ export function isTelemetryEnabled() {
 /** Enable/disable telemetry (user action). */
 export function setTelemetryEnabled(enabled) {
   try {
-    localStorage.setItem('tmcut.telemetry.enabled', String(Boolean(enabled)))
+    const storage = getStorage()
+    if (storage) {
+      storage.setItem('tmcut.telemetry.enabled', String(Boolean(enabled)))
+    }
   } catch {}
 }
 

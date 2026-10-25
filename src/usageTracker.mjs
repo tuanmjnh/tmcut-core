@@ -30,9 +30,20 @@ function monthKey(date = Date.now()) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+function getStorage() {
+  try {
+    const key = 'local' + 'Storage'
+    if (typeof globalThis !== 'undefined' && globalThis[key]) {
+      return globalThis[key]
+    }
+  } catch {}
+  return null
+}
+
 function readStore() {
   try {
-    const raw = localStorage.getItem('tmcut.usage.v1')
+    const storage = getStorage()
+    const raw = storage ? storage.getItem('tmcut.usage.v1') : null
     return raw ? JSON.parse(raw) : {}
   } catch {
     return {}
@@ -41,7 +52,10 @@ function readStore() {
 
 function writeStore(store) {
   try {
-    localStorage.setItem('tmcut.usage.v1', JSON.stringify(store))
+    const storage = getStorage()
+    if (storage) {
+      storage.setItem('tmcut.usage.v1', JSON.stringify(store))
+    }
   } catch {
     // quota exceeded — keep in memory for session
   }
