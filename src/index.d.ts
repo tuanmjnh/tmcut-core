@@ -1288,3 +1288,17 @@ export function filterTemplates(templates?: TmcutTemplate[] | null, options?: Fi
 export function createTemplateFromTimeline(timeline: TmcutTemplateSourceTimeline, meta?: Partial<TmcutTemplate>): TmcutTemplate
 export function instantiateTemplate(template: TmcutTemplate, options?: { replacements?: Record<string, { src?: string, text?: string, name?: string }> }): InstantiateTemplateResult
 export function replacePlaceholder(timeline: TmcutTimeline, clipId: string, replacement?: { src?: string, text?: string, name?: string, thumbPath?: string }): boolean
+
+// --- Marketplace starter catalog (src/marketplaceCatalog.mjs) --------------
+// Bundled, license-reviewed rows shown in the in-app marketplace. They are
+// `sample` sourced (no download) and free, so a row can never arrive with an
+// unverified license or a price; see test/marketplace-catalog.test.mjs.
+export const STARTER_MUSIC_CATALOG: AssetCenterCatalogEntry[]
+export const STARTER_SFX_CATALOG: AssetCenterCatalogEntry[]
+export const STARTER_FONT_CATALOG: AssetCenterCatalogEntry[]
+export const STARTER_MARKETPLACE_CATALOG: AssetCenterCatalogEntry[]
+export function getMarketplaceByCategory(category?: string): AssetCenterCatalogEntry[]
+export function getMarketplaceMusic(): AssetCenterCatalogEntry[]
+export function getMarketplaceSfx(): AssetCenterCatalogEntry[]
+export function getMarketplaceFonts(): AssetCenterCatalogEntry[]
+export function getMarketplaceEntryById(id?: string): AssetCenterCatalogEntry | undefined
