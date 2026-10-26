@@ -1302,3 +1302,43 @@ export function getMarketplaceMusic(): AssetCenterCatalogEntry[]
 export function getMarketplaceSfx(): AssetCenterCatalogEntry[]
 export function getMarketplaceFonts(): AssetCenterCatalogEntry[]
 export function getMarketplaceEntryById(id?: string): AssetCenterCatalogEntry | undefined
+
+// --- Provider routing (src/providerRouting.mjs) -----------------------------
+// Capability matrix + per-scene provider fallback for the Video Factory
+// (Roadmap v1 §7, P7). Pure JSON in / JSON out; see test/provider-routing.test.mjs.
+export interface ProviderRouteRequest {
+  sceneId?: string
+  capabilities?: string[]
+  durationSec?: number
+}
+export interface ProviderRouteSkip {
+  providerId: string
+  reason: string
+}
+export interface ProviderRouteResult {
+  ok: boolean
+  providerId?: string
+  reason?: string
+  skipped: ProviderRouteSkip[]
+}
+export interface ProviderPolicyInput {
+  allowedProviders?: string[]
+  fallbackOrder?: string[]
+  minimumCapabilities?: string[]
+}
+export function isProviderHealthy(manifest: Record<string, unknown> | null | undefined, unhealthy?: string[]): boolean
+export function canServe(manifest: Record<string, unknown> | null | undefined, request?: ProviderRouteRequest): { ok: boolean, reason?: string }
+export function routeScene(options?: { request?: ProviderRouteRequest, manifests?: Record<string, unknown>[], policy?: ProviderPolicyInput, unhealthy?: string[], requireVerified?: boolean }): ProviderRouteResult
+export function routeStoryboard(options?: { scenes?: ProviderRouteRequest[], manifests?: Record<string, unknown>[], policy?: ProviderPolicyInput, unhealthy?: string[], requireVerified?: boolean }): { routed: Array<{ sceneId: string | null, providerId: string | null, skipped: ProviderRouteSkip[], reason?: string }>, unrouted: number, allRouted: boolean }
+export interface ProviderCapabilityRow {
+  providerId: string
+  displayName: string
+  verified: boolean
+  modalities: string[]
+  maxDurationSec: number
+  costModel: string
+  estimatedCostPerUnit: number
+  canServe: boolean
+  reason: string | null
+}
+export function buildCapabilityMatrix(manifests?: Record<string, unknown>[], request?: ProviderRouteRequest): ProviderCapabilityRow[]

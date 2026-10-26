@@ -38,6 +38,8 @@ export function createCapabilityManifest(input = {}) {
     displayName: String(input.displayName || ''),
     // 'image' | 'video' | 'both'
     modalities: Array.isArray(input.modalities) ? input.modalities.filter(m => ['image', 'video'].includes(m)) : [],
+    // Extra non-modality capabilities (e.g. 'image-to-video', 'upscale').
+    extraCapabilities: Array.isArray(input.extraCapabilities) ? input.extraCapabilities.map(String) : [],
     // MIME types the adapter can produce
     outputFormats: {
       image: Array.isArray(input.outputFormats?.image) ? input.outputFormats.image.filter(f => SUPPORTED_IMAGE_FORMATS.includes(f)) : ['png'],
