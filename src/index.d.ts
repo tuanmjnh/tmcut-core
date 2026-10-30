@@ -629,6 +629,18 @@ export interface TmcutEffectParam {
   options?: string[]
 }
 
+/** Declared preview behaviour of a definition (Roadmap v1 §5.1 / §5.6). */
+export interface TmcutEffectPreview {
+  /** How the UI renders the preview. `css` is a browser approximation. */
+  strategy: 'css'
+  /**
+   * `exact` — the preview performs the same pixel operation as the export.
+   * `approximate` — same visual intent, different maths.
+   * `illustrative` — hints at the effect only; it is NOT what the export does.
+   */
+  fidelity: 'exact' | 'approximate' | 'illustrative'
+}
+
 export interface TmcutEffectDescriptor {
   type: string
   /** English constant label; UIs translate by `type` instead. */
@@ -636,12 +648,28 @@ export interface TmcutEffectDescriptor {
   params: TmcutEffectParam[]
   /** False while the export compiler cannot map this effect yet (R4). */
   renderReady: boolean
+  /** Registry bucket used by the library panels; missing means `other`. */
+  category?: string
+  /** Preview contract — the UI must read fidelity from here, not its own table. */
+  preview: TmcutEffectPreview
 }
 
 export const EFFECT_REGISTRY: Record<string, TmcutEffectDescriptor>
 export function validateEffect(effect: unknown): string[]
 export function normalizeEffects(list: unknown): TmcutClipEffect[]
 export function buildFfmpegEffectFilters(effects: unknown): string[]
+/** Capability matrix for one effect; null for an unregistered type. */
+export function fxCapabilities(type: string): {
+  fidelity: TmcutEffectPreview['fidelity']
+  strategy: TmcutEffectPreview['strategy']
+  exportSupported: boolean
+  label: string
+  category: string
+} | null
+/** Coerce one raw param value into registry bounds; undefined when unknown. */
+export function clampEffectParam(type: string, name: string, raw: unknown): unknown
+/** The export FFmpeg chain of one lut3d preset; null when it has none (unknown id or the `neutral` no-op). */
+export function lut3dChain(preset: string): string | null
 
 export interface StabilizeOptions {
   level?: TmcutStabilizeLevel
@@ -1186,6 +1214,31 @@ export type TmcutTemplateCategory
     | 'minimal'
     | 'custom'
 
+export type TmcutTemplateIndustry
+  = | 'general'
+    | 'fnb'
+    | 'beauty'
+    | 'fashion'
+    | 'health'
+    | 'realestate'
+    | 'education'
+    | 'travel'
+    | 'tech'
+    | 'finance'
+    | 'automotive'
+    | 'medical'
+    | 'services'
+    | 'events'
+    | 'ecommerce'
+    | 'pets'
+    | 'creator'
+
+export interface TmcutTemplateIndustryMeta {
+  id: TmcutTemplateIndustry
+  label: string
+  icon: string
+}
+
 export interface TmcutTemplatePlaceholder {
   id: string
   type: 'video' | 'image' | 'audio' | 'text'
@@ -1215,6 +1268,10 @@ export interface TmcutTemplate {
   name: string
   description?: string
   category: TmcutTemplateCategory
+  /** Business field the card is written for (see INDUSTRY_CATALOG). */
+  industry?: TmcutTemplateIndustry
+  /** Free-form search keywords (Vietnamese + English) matched by filterTemplates. */
+  tags?: string[]
   aspectRatio: '9:16' | '16:9' | '1:1'
   canvas: {
     width: number
@@ -1243,6 +1300,7 @@ export interface FilterTemplatesOptions {
   category?: string
   aspectRatio?: string
   search?: string
+  industry?: string
 }
 
 export interface InstantiateTemplateResult {
@@ -1263,6 +1321,7 @@ export type TmcutTemplateSourceTimeline = {
 }
 
 export const BUILTIN_TEMPLATES: TmcutTemplate[]
+export const INDUSTRY_CATALOG: TmcutTemplateIndustryMeta[]
 export const TEMPLATE_SCHEMA_VERSION: number
 export const TEMPLATE_MIN_SUPPORTED_VERSION: number
 export function getBuiltinTemplates(): TmcutTemplate[]
@@ -1303,6 +1362,9 @@ export function getMarketplaceSfx(): AssetCenterCatalogEntry[]
 export function getMarketplaceFonts(): AssetCenterCatalogEntry[]
 export function getMarketplaceEntryById(id?: string): AssetCenterCatalogEntry | undefined
 
+// --- Generation to Asset Center bridge (src/generationToAssetCenter.mjs) -------
+export function getAssemblyReadyAssets(entries: AssetCenterCatalogEntry[]): AssetCenterCatalogEntry[]
+
 // --- Provider routing (src/providerRouting.mjs) -----------------------------
 // Capability matrix + per-scene provider fallback for the Video Factory
 // (Roadmap v1 §7, P7). Pure JSON in / JSON out; see test/provider-routing.test.mjs.
@@ -1342,3 +1404,51 @@ export interface ProviderCapabilityRow {
   reason: string | null
 }
 export function buildCapabilityMatrix(manifests?: Record<string, unknown>[], request?: ProviderRouteRequest): ProviderCapabilityRow[]
+
+// --- HTML/CSS video (src/htmlVideo.mjs) -------------------------------------
+// Authoring model follows the HyperFrames seek contract: an HTML composition
+// with a data-composition-id root and a time-pure __hf.seek(t). Pure spec math
+// and lint only — capture and encoding live in the host app.
+export const HTML_VIDEO_SPEC_VERSION: number
+export const HTML_VIDEO_LIMITS: {
+  readonly minWidth: number
+  readonly maxWidth: number
+  readonly minHeight: number
+  readonly maxHeight: number
+  readonly minFps: number
+  readonly maxFps: number
+  readonly minDurationSec: number
+  readonly maxDurationSec: number
+  readonly maxFrames: number
+  readonly maxHtmlBytes: number
+}
+export interface HtmlVideoPreset { id: string, width: number, height: number }
+export const HTML_VIDEO_PRESETS: readonly HtmlVideoPreset[]
+export function htmlVideoPreset(id: string): HtmlVideoPreset | null
+export function frameCountFor(durationSec: number, fps: number): number
+export function frameTimeSec(frame: number, fps: number): number
+export function frameTimes(durationSec: number, fps: number): number[]
+export function collectHtmlTokens(html: string): string[]
+export function htmlVideoEscape(value: unknown): string
+export function replaceHtmlTokens(html: string, values?: Record<string, string | number | boolean | null>): string
+export function unresolvedHtmlTokens(html: string, values?: Record<string, unknown>): string[]
+export interface HtmlVideoLintIssue { code: string, level: 'error' | 'warn', message: string }
+export function lintHtmlVideo(html: string): HtmlVideoLintIssue[]
+export interface HtmlVideoSpecInput {
+  html?: string
+  width?: number
+  height?: number
+  fps?: number
+  durationSec?: number
+  variables?: Record<string, unknown>
+}
+export interface HtmlVideoSpecResult {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  frames: number
+  durationSec: number
+}
+export function validateHtmlVideoSpec(spec?: HtmlVideoSpecInput): HtmlVideoSpecResult
+export function isBlockedRenderHost(hostname: string): boolean
+export function isAllowedRenderUrl(rawUrl: string, allowRemote?: boolean): boolean

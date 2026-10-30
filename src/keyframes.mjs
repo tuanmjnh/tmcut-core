@@ -15,6 +15,7 @@
 // functions are pure except setKeyframe/removeKeyframe, which mutate
 // `clip.keyframes` in place (wrap them with the app's applyV3Edit for
 // undo/history like every other core mutation).
+import { TICKS_PER_SECOND } from './time.mjs'
 
 /** Easing names accepted by setKeyframe/evalKeyframe. */
 export const KEYFRAME_EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'step']
@@ -161,8 +162,8 @@ export function keyframeExpr(clip, prop, timeVar = 't') {
   for (let i = kf.length - 2; i >= 0; i--) {
     const a = kf[i]
     const b = kf[i + 1]
-    const sa = a.t / 120000 // TICKS_PER_SECOND
-    const sb = b.t / 120000
+    const sa = a.t / TICKS_PER_SECOND
+    const sb = b.t / TICKS_PER_SECOND
     const span = sb - sa
     const va = a.value
     const vb = b.value
@@ -188,6 +189,6 @@ export function keyframeExpr(clip, prop, timeVar = 't') {
     expr = `if(lt(${timeVar},${fmt(sb)}),${segExpr},${expr})`
   }
 
-  const s0 = kf[0].t / 120000
+  const s0 = kf[0].t / TICKS_PER_SECOND
   return `if(lt(${timeVar},${fmt(s0)}),${fmt(kf[0].value)},${expr})`
 }

@@ -9,6 +9,7 @@ import {
   createTemplateFromTimeline,
   instantiateTemplate,
   replacePlaceholder,
+  INDUSTRY_CATALOG,
   TICKS_PER_SECOND
 } from '../src/index.mjs'
 
@@ -194,4 +195,124 @@ test('templates: replacePlaceholder updates target clip in place', () => {
 
   const failed = replacePlaceholder(timeline, 'non-existent', { src: 'x' })
   assert.equal(failed, false)
+})
+
+// =============================================================================
+//  Industry pack invariants
+//  Every shipped card must be a usable timeline, not decorative data: the
+//  tests below check the wiring (placeholders → clips), the geometry (nothing
+//  scheduled past the template's own end, nothing laid out off-canvas) and the
+//  filter contract the library UI depends on.
+// =============================================================================
+
+test('templates: industry pack covers the catalog without duplicate ids', () => {
+  const ids = BUILTIN_TEMPLATES.map(t => t.id)
+  assert.equal(new Set(ids).size, ids.length, 'template ids are unique')
+
+  const known = new Set(INDUSTRY_CATALOG.map(i => i.id))
+  for (const tpl of BUILTIN_TEMPLATES) {
+    assert.ok(known.has(tpl.industry), `${tpl.id} has a known industry (${tpl.industry})`)
+  }
+
+  for (const industry of INDUSTRY_CATALOG) {
+    if (industry.id === 'general') continue
+    const count = BUILTIN_TEMPLATES.filter(t => t.industry === industry.id).length
+    assert.ok(count >= 1, `industry "${industry.id}" ships at least one template`)
+  }
+
+  assert.ok(BUILTIN_TEMPLATES.length >= 24, 'pack ships a full industry set')
+})
+
+test('templates: every placeholder resolves to a real clip on its track', () => {
+  for (const tpl of BUILTIN_TEMPLATES) {
+    const trackById = new Map(tpl.tracks.map(trk => [trk.id, trk]))
+    const placeholderIds = new Set()
+
+    for (const ph of tpl.placeholders) {
+      assert.equal(placeholderIds.has(ph.id), false, `${tpl.id}: placeholder id ${ph.id} is unique`)
+      placeholderIds.add(ph.id)
+
+      const track = trackById.get(ph.trackId)
+      assert.ok(track, `${tpl.id}: placeholder ${ph.id} points at an existing track`)
+      const clip = (track.items || []).find(item => item.id === ph.clipId)
+      assert.ok(clip, `${tpl.id}: placeholder ${ph.id} points at a clip on that track`)
+      assert.equal(clip.type, track.type, `${tpl.id}: ${ph.clipId} type matches its track`)
+
+      if (ph.type === 'text') {
+        assert.equal(clip.text, ph.defaultContent, `${tpl.id}: ${ph.id} defaultContent mirrors the clip text`)
+      }
+    }
+
+    assert.ok(tpl.placeholders.some(p => p.required), `${tpl.id} marks at least one required slot`)
+    assert.ok(
+      tpl.placeholders.some(p => p.type === 'video' || p.type === 'image'),
+      `${tpl.id} has a media slot to drop footage into`
+    )
+  }
+})
+
+test('templates: clip geometry stays inside the template and the canvas', () => {
+  for (const tpl of BUILTIN_TEMPLATES) {
+    const { width: W, height: H } = tpl.canvas
+    assert.equal(tpl.durationTicks % 1, 0, `${tpl.id}: duration is whole ticks`)
+
+    for (const track of tpl.tracks) {
+      for (const item of track.items) {
+        const label = `${tpl.id}/${item.id}`
+        assert.ok(item.in >= 0, `${label}: in >= 0`)
+        assert.ok(item.out > item.in, `${label}: out > in`)
+        assert.ok(item.out <= tpl.durationTicks, `${label}: out within duration`)
+        assert.ok(item.offset >= 0, `${label}: offset >= 0`)
+        assert.ok(
+          item.offset + (item.out - item.in) <= tpl.durationTicks,
+          `${label}: scheduled end within duration`
+        )
+
+        if (item.type === 'text') {
+          assert.ok(typeof item.text === 'string' && item.text.trim().length > 0, `${label}: has copy`)
+          assert.ok(item.fontSize >= 16 && item.fontSize <= H / 4, `${label}: readable font size`)
+          assert.ok(Math.abs(item.x) <= W / 2, `${label}: x inside canvas`)
+          assert.ok(Math.abs(item.y) <= H / 2, `${label}: y inside canvas`)
+        }
+      }
+    }
+  }
+})
+
+test('templates: canvas matches the advertised aspect ratio', () => {
+  for (const tpl of BUILTIN_TEMPLATES) {
+    const ratio = tpl.canvas.width / tpl.canvas.height
+    const expected = tpl.aspectRatio === '9:16' ? 9 / 16 : tpl.aspectRatio === '16:9' ? 16 / 9 : 1
+    assert.ok(Math.abs(ratio - expected) < 0.01, `${tpl.id}: ${tpl.aspectRatio} canvas is ${tpl.canvas.width}x${tpl.canvas.height}`)
+  }
+})
+
+test('templates: every builtin instantiates and applies its own placeholder copy', () => {
+  for (const tpl of BUILTIN_TEMPLATES) {
+    const title = tpl.placeholders.find(p => p.type === 'text')
+    assert.ok(title, `${tpl.id} has a text slot`)
+
+    const marker = `REPLACED ${tpl.id}`
+    const out = instantiateTemplate(tpl, { replacements: { [title.id]: { text: marker } } })
+
+    assert.ok(out.timeline.tracks.length === tpl.tracks.length, `${tpl.id}: tracks survive instantiation`)
+    const texts = out.timeline.tracks.flatMap(trk => trk.items).map(item => item.text).filter(Boolean)
+    assert.ok(texts.includes(marker), `${tpl.id}: replacement reaches the clip`)
+    assert.equal(out.durationMs, Math.round((tpl.durationTicks / TICKS_PER_SECOND) * 1000), `${tpl.id}: durationMs round-trips`)
+  }
+})
+
+test('templates: search and industry filters find the industry cards', () => {
+  const fnb = filterTemplates(BUILTIN_TEMPLATES, { industry: 'fnb' })
+  assert.ok(fnb.length >= 2)
+  assert.ok(fnb.every(t => t.industry === 'fnb'))
+
+  const byTag = filterTemplates(BUILTIN_TEMPLATES, { search: 'quán ăn' })
+  assert.ok(byTag.some(t => t.industry === 'fnb'), 'Vietnamese tag finds the F&B cards')
+
+  const byIndustryLabel = filterTemplates(BUILTIN_TEMPLATES, { search: 'real estate' })
+  assert.ok(byIndustryLabel.every(t => t.industry === 'realestate'))
+
+  const combined = filterTemplates(BUILTIN_TEMPLATES, { industry: 'beauty', aspectRatio: '16:9' })
+  assert.ok(combined.every(t => t.industry === 'beauty' && t.aspectRatio === '16:9'))
 })

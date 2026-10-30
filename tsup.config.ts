@@ -3,7 +3,8 @@ import { defineConfig } from 'tsup'
 export default defineConfig({
   entry: {
     index: 'src/index.mjs',
-    generationAdapter: 'src/generationAdapter.mjs'
+    generationAdapter: 'src/generationAdapter.mjs',
+    providerAdapter: 'src/providerAdapter.mjs'
   },
   format: ['cjs', 'esm'],
   clean: true,

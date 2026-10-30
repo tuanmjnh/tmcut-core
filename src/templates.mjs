@@ -42,6 +42,968 @@ function localAssetFingerprint(src) {
   return fileNameFromSrc(src)
 }
 
+// =============================================================================
+//  Industry template pack
+//  ---------------------------------------------------------------------------
+//  The six templates below cover FORMATS (opener, promo, split, outro…).
+//  This pack covers INDUSTRIES: one or two ready-to-shoot cards per field of
+//  business, all built from a handful of layout archetypes so each one is a
+//  real editable timeline (media bed + headline beats + CTA), not a mock-up.
+//  Copy ships in Vietnamese — the app's default locale — and lives in text
+//  clips, so the Customize dialog rewrites it like any other placeholder.
+//  `tags` carries the Vietnamese keywords users actually type; filterTemplates
+//  searches them, which is what makes "quán ăn" find the F&B cards.
+// =============================================================================
+
+/** Industry ids a template can be filed under. UI labels come from i18n. */
+export const INDUSTRY_CATALOG = [
+  { id: 'general', label: 'Any Industry', icon: 'i-lucide-globe' },
+  { id: 'fnb', label: 'Food & Beverage', icon: 'i-lucide-utensils-crossed' },
+  { id: 'beauty', label: 'Beauty & Spa', icon: 'i-lucide-sparkles' },
+  { id: 'fashion', label: 'Fashion & Retail', icon: 'i-lucide-shirt' },
+  { id: 'health', label: 'Health & Fitness', icon: 'i-lucide-dumbbell' },
+  { id: 'realestate', label: 'Real Estate', icon: 'i-lucide-building-2' },
+  { id: 'education', label: 'Education', icon: 'i-lucide-graduation-cap' },
+  { id: 'travel', label: 'Travel & Hospitality', icon: 'i-lucide-plane' },
+  { id: 'tech', label: 'Tech & SaaS', icon: 'i-lucide-rocket' },
+  { id: 'finance', label: 'Finance & Insurance', icon: 'i-lucide-landmark' },
+  { id: 'automotive', label: 'Automotive', icon: 'i-lucide-car' },
+  { id: 'medical', label: 'Healthcare & Clinic', icon: 'i-lucide-stethoscope' },
+  { id: 'services', label: 'Local Services', icon: 'i-lucide-wrench' },
+  { id: 'events', label: 'Wedding & Events', icon: 'i-lucide-heart-handshake' },
+  { id: 'ecommerce', label: 'E-commerce', icon: 'i-lucide-shopping-bag' },
+  { id: 'pets', label: 'Pets', icon: 'i-lucide-paw-print' },
+  { id: 'creator', label: 'Creator & Media', icon: 'i-lucide-clapperboard' }
+]
+
+const PACK_CANVAS = {
+  '9:16': { width: 1080, height: 1920, fps: 30 },
+  '16:9': { width: 1920, height: 1080, fps: 30 },
+  '1:1': { width: 1080, height: 1080, fps: 30 }
+}
+
+const PACK_ACCENT = '#ffd166'
+const packMs = seconds => Math.round(seconds * TICKS_PER_SECOND)
+
+function packSizes(vertical) {
+  return vertical
+    ? { h1: 76, h2: 46, body: 34, cta: 32, eyebrow: 34 }
+    : { h1: 58, h2: 34, body: 28, cta: 26, eyebrow: 26 }
+}
+
+function packTextClip(id, def, durationTicks) {
+  const start = def.inTicks || 0
+  return {
+    id,
+    type: 'text',
+    name: def.name,
+    text: def.text,
+    color: def.color || '#ffffff',
+    fontSize: Math.round(def.fontSize),
+    fontFamily: 'Inter',
+    bold: def.bold !== false,
+    shadow: true,
+    align: def.align || 'center',
+    animIn: def.animIn || 'slide-up',
+    animInDuration: def.animInDuration ?? 0.4,
+    animOut: 'fade',
+    animOutDuration: 0.3,
+    x: Math.round(def.x || 0),
+    y: Math.round(def.y || 0),
+    scale: 100,
+    opacity: 100,
+    rotation: 0,
+    in: start,
+    out: def.outTicks || durationTicks,
+    offset: start,
+    speed: 1,
+    effects: [],
+    keyframes: []
+  }
+}
+
+function packMediaClip(id, name, durationTicks, opacity = 100) {
+  return {
+    id,
+    type: 'video',
+    name,
+    src: '',
+    x: 0,
+    y: 0,
+    scale: 100,
+    opacity,
+    rotation: 0,
+    fit: 'cover',
+    in: 0,
+    out: durationTicks,
+    offset: 0,
+    speed: 1,
+    effects: [],
+    keyframes: []
+  }
+}
+
+function packAudioClip(id, name, durationTicks) {
+  return {
+    id,
+    type: 'audio',
+    name,
+    src: '',
+    in: 0,
+    out: durationTicks,
+    offset: 0,
+    speed: 1,
+    volume: 70,
+    fade: { in: packMs(0.4), out: packMs(0.6) },
+    effects: [],
+    keyframes: []
+  }
+}
+
+/**
+ * Text-beat archetypes. Each returns clip defs positioned in canvas pixels
+ * (x/y are offsets from canvas centre, the same convention the preview and
+ * the Inspector use). Keeping them here — instead of hand-writing 24 sets of
+ * coordinates — is what makes every card in the pack consistent and testable.
+ */
+const PACK_LAYOUTS = {
+  hook({ H, copy, accent, sizes }) {
+    const defs = [{
+      key: 'title',
+      name: 'Headline',
+      text: copy.title,
+      y: -0.28 * H,
+      fontSize: sizes.h1,
+      animIn: 'slide-up',
+      animInDuration: 0.5,
+      required: true
+    }]
+    if (copy.subtitle) {
+      defs.push({
+        key: 'subtitle',
+        name: 'Subheadline',
+        text: copy.subtitle,
+        y: -0.16 * H,
+        fontSize: sizes.body,
+        bold: false,
+        color: '#f2f2f2',
+        animIn: 'fade',
+        inTicks: packMs(0.2)
+      })
+    }
+    if (copy.cta) {
+      defs.push({
+        key: 'cta',
+        name: 'Call To Action',
+        text: copy.cta,
+        y: 0.42 * H,
+        fontSize: sizes.cta,
+        color: accent,
+        inTicks: packMs(0.9)
+      })
+    }
+    return defs
+  },
+
+  listicle({ H, copy, accent, sizes, durationTicks }) {
+    const defs = [{
+      key: 'eyebrow',
+      name: 'Kicker',
+      text: copy.eyebrow,
+      y: -0.34 * H,
+      fontSize: sizes.eyebrow,
+      color: accent,
+      animIn: 'fade',
+      required: true
+    }]
+    ;(copy.items || []).forEach((text, index) => {
+      defs.push({
+        key: `item${index + 1}`,
+        name: `List Item ${index + 1}`,
+        text,
+        y: (-0.16 + index * 0.14) * H,
+        fontSize: sizes.h2,
+        animIn: 'slide-right',
+        inTicks: packMs(0.4 + index * 1.8)
+      })
+    })
+    if (copy.cta) {
+      defs.push({
+        key: 'cta',
+        name: 'Call To Action',
+        text: copy.cta,
+        y: 0.38 * H,
+        fontSize: sizes.cta,
+        color: accent,
+        inTicks: Math.max(packMs(0.4), durationTicks - packMs(1.6))
+      })
+    }
+    return defs
+  },
+
+  banner({ H, copy, accent, sizes }) {
+    const defs = [{
+      key: 'title',
+      name: 'Headline',
+      text: copy.title,
+      y: -0.1 * H,
+      fontSize: sizes.h1,
+      animIn: 'slide-up',
+      animInDuration: 0.5,
+      required: true
+    }]
+    if (copy.subtitle) {
+      defs.push({
+        key: 'subtitle',
+        name: 'Subheadline',
+        text: copy.subtitle,
+        y: 0.01 * H,
+        fontSize: sizes.body,
+        bold: false,
+        color: '#eeeeee',
+        animIn: 'fade',
+        inTicks: packMs(0.25)
+      })
+    }
+    if (copy.cta) {
+      defs.push({
+        key: 'cta',
+        name: 'Call To Action',
+        text: copy.cta,
+        y: 0.16 * H,
+        fontSize: sizes.cta,
+        color: accent,
+        inTicks: packMs(0.7)
+      })
+    }
+    return defs
+  },
+
+  price({ H, copy, accent, sizes }) {
+    const defs = [{
+      key: 'title',
+      name: 'Price / Offer',
+      text: copy.title,
+      y: 0.04 * H,
+      fontSize: sizes.h1 * 1.2,
+      color: accent,
+      animIn: 'slide-up',
+      animInDuration: 0.45,
+      required: true
+    }]
+    if (copy.subtitle) {
+      defs.push({
+        key: 'subtitle',
+        name: 'Offer Details',
+        text: copy.subtitle,
+        y: 0.16 * H,
+        fontSize: sizes.body,
+        bold: false,
+        color: '#f2f2f2',
+        animIn: 'fade',
+        inTicks: packMs(0.35)
+      })
+    }
+    if (copy.cta) {
+      defs.push({
+        key: 'cta',
+        name: 'Call To Action',
+        text: copy.cta,
+        y: 0.28 * H,
+        fontSize: sizes.cta,
+        color: '#ffffff',
+        inTicks: packMs(0.8)
+      })
+    }
+    return defs
+  },
+
+  'lower-third'({ H, W, copy, accent, sizes }) {
+    const x = -0.22 * W
+    const defs = [{
+      key: 'title',
+      name: 'Name / Subject',
+      text: copy.title,
+      x,
+      y: 0.3 * H,
+      fontSize: sizes.h2,
+      align: 'left',
+      animIn: 'slide-right',
+      required: true
+    }]
+    if (copy.subtitle) {
+      defs.push({
+        key: 'subtitle',
+        name: 'Role / Detail Line',
+        text: copy.subtitle,
+        x,
+        y: 0.345 * H,
+        fontSize: Math.round(sizes.body * 0.82),
+        bold: false,
+        color: accent,
+        align: 'left',
+        animIn: 'slide-right',
+        inTicks: packMs(0.25)
+      })
+    }
+    return defs
+  },
+
+  'before-after'({ H, copy, accent, sizes, durationTicks }) {
+    const mid = Math.round(durationTicks / 2)
+    const defs = []
+    if (copy.subtitle) {
+      defs.push({
+        key: 'subtitle',
+        name: 'Context Caption',
+        text: copy.subtitle,
+        y: -0.36 * H,
+        fontSize: sizes.body,
+        bold: false,
+        color: '#f2f2f2',
+        animIn: 'fade',
+        inTicks: packMs(0.2),
+        required: true
+      })
+    }
+    defs.push({
+      key: 'before',
+      name: 'Before Label',
+      text: copy.before,
+      y: -0.02 * H,
+      fontSize: sizes.h1 * 0.9,
+      outTicks: mid,
+      animIn: 'slide-up',
+      animInDuration: 0.4,
+      required: true
+    })
+    if (copy.after) {
+      defs.push({
+        key: 'after',
+        name: 'After Label',
+        text: copy.after,
+        y: -0.02 * H,
+        fontSize: sizes.h1 * 0.9,
+        color: accent,
+        inTicks: mid,
+        animIn: 'slide-up',
+        animInDuration: 0.4
+      })
+    }
+    return defs
+  },
+
+  stack({ H, copy, accent, sizes }) {
+    const defs = [{
+      key: 'title',
+      name: 'Headline',
+      text: copy.title,
+      y: -0.02 * H,
+      fontSize: sizes.h1,
+      animIn: 'slide-up',
+      animInDuration: 0.5,
+      inTicks: packMs(0.2),
+      required: true
+    }]
+    if (copy.eyebrow) {
+      defs.unshift({
+        key: 'eyebrow',
+        name: 'Kicker',
+        text: copy.eyebrow,
+        y: -0.2 * H,
+        fontSize: sizes.eyebrow,
+        color: accent,
+        animIn: 'fade',
+        inTicks: 0
+      })
+    }
+    if (copy.cta) {
+      defs.push({
+        key: 'cta',
+        name: 'Call To Action',
+        text: copy.cta,
+        y: 0.16 * H,
+        fontSize: sizes.cta,
+        color: '#ffffff',
+        inTicks: packMs(0.8)
+      })
+    }
+    return defs
+  }
+}
+
+/**
+ * Turns one compact spec into a full template: canvas, text beats, media bed,
+ * optional music slot, and the placeholder map the Customize dialog reads.
+ */
+function buildIndustryTemplate(spec) {
+  const canvas = PACK_CANVAS[spec.aspectRatio]
+  const durationTicks = packMs(spec.seconds)
+  const key = spec.id.replace(/^tpl-/, '')
+  const accent = spec.accent || PACK_ACCENT
+  const vertical = canvas.height > canvas.width
+  const sizes = packSizes(vertical)
+  const defs = PACK_LAYOUTS[spec.layout]({ H: canvas.height, W: canvas.width, copy: spec.copy, accent, sizes, durationTicks })
+
+  const textTracks = defs.map(def => ({
+    id: `tr-${key}-text-${def.key}`,
+    type: 'text',
+    name: def.name,
+    items: [packTextClip(`c-${key}-${def.key}`, def, durationTicks)]
+  }))
+  const mediaTrackId = `tr-${key}-media`
+  const audioTrackId = `tr-${key}-audio`
+  const mediaClipId = `c-${key}-media`
+  const audioClipId = `c-${key}-audio`
+
+  const mediaTrack = {
+    id: mediaTrackId,
+    type: 'video',
+    name: spec.mediaTrackName || 'Main Footage',
+    items: [packMediaClip(mediaClipId, spec.mediaLabel || 'Main Footage', durationTicks, spec.mediaOpacity ?? 100)]
+  }
+  const audioTrack = {
+    id: audioTrackId,
+    type: 'audio',
+    name: 'Background Music',
+    items: [packAudioClip(audioClipId, 'Music Bed', durationTicks)]
+  }
+
+  const placeholders = [
+    {
+      id: `ph-${key}-media`,
+      type: 'video',
+      label: spec.mediaLabel || 'Main Footage',
+      clipId: mediaClipId,
+      trackId: mediaTrackId,
+      required: true
+    },
+    ...defs.map(def => ({
+      id: `ph-${key}-${def.key}`,
+      type: 'text',
+      label: def.name,
+      clipId: `c-${key}-${def.key}`,
+      trackId: `tr-${key}-text-${def.key}`,
+      defaultContent: def.text,
+      required: !!def.required
+    })),
+    {
+      id: `ph-${key}-audio`,
+      type: 'audio',
+      label: 'Background Music',
+      clipId: audioClipId,
+      trackId: audioTrackId,
+      required: false
+    }
+  ]
+
+  return {
+    // No schemaVersion on shipped builtins: like the six hand-written cards
+    // above, absence IS the v1 signal and migrateTemplate() stamps it on
+    // import. Every builtin must keep migrating cleanly.
+    id: spec.id,
+    version: 1,
+    name: spec.name,
+    description: spec.description,
+    industry: spec.industry,
+    tags: spec.tags || [],
+    category: spec.category,
+    aspectRatio: spec.aspectRatio,
+    canvas,
+    durationTicks,
+    thumbnail: spec.thumbnail,
+    isBuiltin: true,
+    createdAt: 1776000000000,
+    placeholders,
+    tracks: [...textTracks, mediaTrack, audioTrack]
+  }
+}
+
+/**
+ * One spec per industry card. `copy` is placeholder text the user replaces in
+ * the Customize dialog; `tags` are the search keywords (Vietnamese + English).
+ */
+const INDUSTRY_TEMPLATE_SPECS = [
+  {
+    id: 'tpl-fnb-menu-price-reveal',
+    name: 'Menu Price Reveal',
+    description: 'Vertical F&B price card: dish footage, oversized price, urgency line and visit CTA.',
+    industry: 'fnb',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'price',
+    thumbnail: 'i-lucide-utensils-crossed',
+    accent: '#ffb703',
+    mediaLabel: 'Dish / Combo Footage',
+    mediaTrackName: 'Dish Footage',
+    tags: ['quán ăn', 'menu', 'giá', 'combo', 'nhà hàng', 'food', 'price', 'restaurant'],
+    copy: {
+      title: 'COMBO TRƯA 59K',
+      subtitle: '1 MÓN CHÍNH + TRÀ ĐÁ + TRÁNG MIỆNG',
+      cta: 'GHÉ QUÁN HÔM NAY'
+    }
+  },
+  {
+    id: 'tpl-fnb-dish-story',
+    name: 'Dish Close-Up Story',
+    description: 'Minimal vertical story for one signature dish with a lower-third name card.',
+    industry: 'fnb',
+    category: 'minimal',
+    aspectRatio: '9:16',
+    seconds: 5,
+    layout: 'lower-third',
+    thumbnail: 'i-lucide-chef-hat',
+    accent: '#ffd166',
+    mediaLabel: 'Signature Dish Footage',
+    mediaTrackName: 'Dish Footage',
+    tags: ['món ăn', 'review quán', 'đặc sản', 'food review', 'dish'],
+    copy: {
+      title: 'PHỞ BÒ GIA TRUYỀN',
+      subtitle: 'NƯỚC DÙNG 12 TIẾNG · 35K'
+    }
+  },
+  {
+    id: 'tpl-beauty-before-after',
+    name: 'Before / After Reveal',
+    description: 'Skincare and spa proof video: before label, timed reveal, result caption.',
+    industry: 'beauty',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 8,
+    layout: 'before-after',
+    thumbnail: 'i-lucide-sparkles',
+    accent: '#7ef0c3',
+    mediaLabel: 'Treatment / Result Footage',
+    mediaTrackName: 'Treatment Footage',
+    tags: ['spa', 'skincare', 'trước sau', 'beauty', 'da', 'before after'],
+    copy: {
+      before: 'TRƯỚC KHI DÙNG',
+      after: 'SAU 4 TUẦN',
+      subtitle: 'LIỆU TRÌNH 4 BƯỚC TẠI SPA'
+    }
+  },
+  {
+    id: 'tpl-beauty-service-combo',
+    name: 'Service Combo Spotlight',
+    description: 'Warm vertical card for a spa/beauty combo with kicker, price and booking CTA.',
+    industry: 'beauty',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'stack',
+    thumbnail: 'i-lucide-flower-2',
+    accent: '#ff8fab',
+    mediaLabel: 'Spa / Salon Footage',
+    mediaTrackName: 'Service Footage',
+    tags: ['spa', 'combo', 'khuyến mãi', 'làm đẹp', 'salon', 'beauty'],
+    copy: {
+      eyebrow: 'ƯU ĐÃI THÁNG NÀY',
+      title: 'COMBO 3 BƯỚC CHỈ 299K',
+      cta: 'ĐẶT LỊCH NGAY'
+    }
+  },
+  {
+    id: 'tpl-fashion-new-drop',
+    name: 'New Drop Lookbook',
+    description: 'Vertical lookbook opener for a new collection drop with shop CTA.',
+    industry: 'fashion',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'stack',
+    thumbnail: 'i-lucide-shirt',
+    accent: '#ffd166',
+    mediaLabel: 'Lookbook Footage',
+    mediaTrackName: 'Lookbook',
+    tags: ['thời trang', 'lookbook', 'bộ sưu tập', 'shop quần áo', 'fashion'],
+    copy: {
+      eyebrow: 'BỘ SƯU TẬP MỚI',
+      title: 'DROP MỚI ĐÃ LÊN KỆ',
+      cta: 'MUA NGAY TẠI SHOP'
+    }
+  },
+  {
+    id: 'tpl-fashion-styling-tips',
+    name: '3-Way Styling Tips',
+    description: 'Three-beat listicle: one item, three outfits, save-for-later CTA.',
+    industry: 'fashion',
+    category: 'minimal',
+    aspectRatio: '9:16',
+    seconds: 9,
+    layout: 'listicle',
+    thumbnail: 'i-lucide-layers',
+    accent: '#ffd166',
+    mediaLabel: 'Outfit Footage',
+    mediaTrackName: 'Outfit B-Roll',
+    tags: ['mix đồ', 'phối đồ', 'thời trang', 'tips', 'styling'],
+    copy: {
+      eyebrow: '1 CHIẾC ÁO - 3 CÁCH MẶC',
+      items: ['01 · ĐI LÀM', '02 · ĐI CHƠI', '03 · ĐI BIỂN'],
+      cta: 'LƯU LẠI ĐỂ MẶC ĐẸP'
+    }
+  },
+  {
+    id: 'tpl-fitness-transformation',
+    name: 'Fitness Transformation',
+    description: 'Before/after transformation reel with day labels and a result caption.',
+    industry: 'health',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 8,
+    layout: 'before-after',
+    thumbnail: 'i-lucide-dumbbell',
+    accent: '#4ade80',
+    mediaLabel: 'Training / Progress Footage',
+    mediaTrackName: 'Progress Footage',
+    tags: ['giảm cân', 'fitness', 'gym', 'lột xác', 'transformation', 'health'],
+    copy: {
+      before: 'NGÀY 1',
+      after: 'NGÀY 90',
+      subtitle: 'KHÔNG GYM VẪN GIẢM 8KG'
+    }
+  },
+  {
+    id: 'tpl-fitness-30-day-challenge',
+    name: '30-Day Challenge',
+    description: 'Habit-challenge listicle with three daily rules and a follow CTA.',
+    industry: 'health',
+    category: 'minimal',
+    aspectRatio: '9:16',
+    seconds: 9,
+    layout: 'listicle',
+    thumbnail: 'i-lucide-flame',
+    accent: '#fb923c',
+    mediaLabel: 'Workout / Habit Footage',
+    mediaTrackName: 'Challenge Footage',
+    tags: ['thử thách', 'thói quen', 'sức khỏe', 'health', 'challenge'],
+    copy: {
+      eyebrow: 'THỬ THÁCH 30 NGÀY',
+      items: ['5 PHÚT MỖI SÁNG', 'KHÔNG ĐỒ NGỌT', 'NGỦ ĐỦ 7 TIẾNG'],
+      cta: 'THEO DÕI ĐỂ XEM KẾT QUẢ'
+    }
+  },
+  {
+    id: 'tpl-realestate-property-tour',
+    name: 'Property Tour Card',
+    description: 'Widescreen listing card: price line, specs, hotline CTA over the walkthrough.',
+    industry: 'realestate',
+    category: 'promo',
+    aspectRatio: '16:9',
+    seconds: 8,
+    layout: 'banner',
+    thumbnail: 'i-lucide-building-2',
+    accent: '#38bdf8',
+    mediaLabel: 'Property Walkthrough',
+    mediaTrackName: 'Property Footage',
+    tags: ['bất động sản', 'căn hộ', 'nhà phố', 'môi giới', 'real estate', 'listing'],
+    copy: {
+      title: 'CĂN HỘ 2PN · VIEW SÔNG',
+      subtitle: '78M² · SỔ HỒNG RIÊNG · NHẬN NHÀ NGAY',
+      cta: 'GỌI ĐỂ XEM NHÀ THỰC TẾ'
+    }
+  },
+  {
+    id: 'tpl-realestate-open-house',
+    name: 'Open House Hook',
+    description: 'Three-second hook for a viewing appointment, built to stop the scroll.',
+    industry: 'realestate',
+    category: 'intro',
+    aspectRatio: '9:16',
+    seconds: 5,
+    layout: 'hook',
+    thumbnail: 'i-lucide-map-pin',
+    accent: '#38bdf8',
+    mediaLabel: 'House Tour Footage',
+    mediaTrackName: 'House Footage',
+    tags: ['nhà đất', 'mở bán', 'bất động sản', 'hook', 'open house'],
+    copy: {
+      title: 'NHÀ NÀY CÓ GÌ ĐẶC BIỆT?',
+      subtitle: 'XEM HẾT 15 GIÂY LÀ BIẾT',
+      cta: 'LƯU TIN ĐỂ ĐI XEM'
+    }
+  },
+  {
+    id: 'tpl-education-course-launch',
+    name: 'Course Launch Banner',
+    description: 'Widescreen course announcement with schedule line and early-bird CTA.',
+    industry: 'education',
+    category: 'promo',
+    aspectRatio: '16:9',
+    seconds: 8,
+    layout: 'banner',
+    thumbnail: 'i-lucide-graduation-cap',
+    accent: '#a78bfa',
+    mediaLabel: 'Class / Campus Footage',
+    mediaTrackName: 'Course Footage',
+    tags: ['khóa học', 'đào tạo', 'học excel', 'tuyển sinh', 'education', 'course'],
+    copy: {
+      title: 'KHOÁ HỌC EXCEL THỰC CHIẾN',
+      subtitle: '8 BUỔI · LÀM ĐƯỢC VIỆC NGAY',
+      cta: 'ĐĂNG KÝ SỚM ĐỂ GIỮ GIÁ'
+    }
+  },
+  {
+    id: 'tpl-education-micro-lesson',
+    name: '3 Tips Micro-Lesson',
+    description: 'Short-form lesson listicle: three actionable tips and a save CTA.',
+    industry: 'education',
+    category: 'minimal',
+    aspectRatio: '9:16',
+    seconds: 9,
+    layout: 'listicle',
+    thumbnail: 'i-lucide-lightbulb',
+    accent: '#a78bfa',
+    mediaLabel: 'Study / Teaching Footage',
+    mediaTrackName: 'Lesson Footage',
+    tags: ['mẹo học', 'sinh viên', 'kỹ năng', 'tips', 'study'],
+    copy: {
+      eyebrow: '3 MẸO HỌC NHANH',
+      items: ['01 · CHIA NHỎ MỤC TIÊU', '02 · ÔN THEO CHU KỲ', '03 · DẠY LẠI NGƯỜI KHÁC'],
+      cta: 'LƯU BÀI NÀY LẠI'
+    }
+  },
+  {
+    id: 'tpl-travel-destination-hook',
+    name: 'Destination Hook',
+    description: 'Travel opener with price line and a comment-pinned itinerary CTA.',
+    industry: 'travel',
+    category: 'intro',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'hook',
+    thumbnail: 'i-lucide-plane',
+    accent: '#fbbf24',
+    mediaLabel: 'Destination Footage',
+    mediaTrackName: 'Travel Footage',
+    tags: ['du lịch', 'đà lạt', 'combo', 'homestay', 'travel', 'destination'],
+    copy: {
+      title: 'ĐỪNG BỎ LỠ ĐÀ LẠT MÙA NÀY',
+      subtitle: '3 NGÀY 2 ĐÊM · 2TR5/NGƯỜI',
+      cta: 'LỊCH TRÌNH CHI TIẾT Ở BÌNH LUẬN'
+    }
+  },
+  {
+    id: 'tpl-travel-room-tour',
+    name: 'Hotel Room Tour',
+    description: 'Widescreen room-tour card with nightly rate, inclusions and booking CTA.',
+    industry: 'travel',
+    category: 'promo',
+    aspectRatio: '16:9',
+    seconds: 8,
+    layout: 'banner',
+    thumbnail: 'i-lucide-hotel',
+    accent: '#fbbf24',
+    mediaLabel: 'Room / Resort Footage',
+    mediaTrackName: 'Room Footage',
+    tags: ['khách sạn', 'resort', 'phòng', 'du lịch', 'hotel', 'room tour'],
+    copy: {
+      title: 'PHÒNG VIEW BIỂN · 1TR2/ĐÊM',
+      subtitle: 'GỒM BUFFET SÁNG VÀ XE ĐƯA ĐÓN',
+      cta: 'ĐẶT PHÒNG NGAY HÔM NAY'
+    }
+  },
+  {
+    id: 'tpl-tech-product-launch',
+    name: 'Product Launch Banner',
+    description: 'Widescreen launch announcement: product name, value props, trial CTA.',
+    industry: 'tech',
+    category: 'promo',
+    aspectRatio: '16:9',
+    seconds: 6,
+    layout: 'banner',
+    thumbnail: 'i-lucide-rocket',
+    accent: '#60a5fa',
+    mediaLabel: 'Product / UI Footage',
+    mediaTrackName: 'Product Footage',
+    tags: ['sản phẩm', 'ra mắt', 'saas', 'app', 'launch', 'tech'],
+    copy: {
+      title: 'RA MẮT TMCUT 2.0',
+      subtitle: 'DỰNG VIDEO TỰ ĐỘNG · XUẤT 4K · DÙNG THỬ 14 NGÀY',
+      cta: 'BẤM DÙNG THỬ NGAY'
+    }
+  },
+  {
+    id: 'tpl-tech-feature-walkthrough',
+    name: 'Feature Walkthrough',
+    description: 'Two-line feature reveal for demo clips: kicker, feature name, try CTA.',
+    industry: 'tech',
+    category: 'minimal',
+    aspectRatio: '16:9',
+    seconds: 6,
+    layout: 'stack',
+    thumbnail: 'i-lucide-mouse-pointer-click',
+    accent: '#60a5fa',
+    mediaLabel: 'Screen Recording',
+    mediaTrackName: 'Screen Capture',
+    tags: ['tính năng', 'demo', 'product', 'saas', 'walkthrough'],
+    copy: {
+      eyebrow: 'TÍNH NĂNG MỚI',
+      title: 'AUTOCUT BẰNG AI',
+      cta: 'BẤM THỬ NGAY'
+    }
+  },
+  {
+    id: 'tpl-finance-loan-explainer',
+    name: 'Loan Product Explainer',
+    description: 'Three-point explainer for a finance product with a learn-more CTA.',
+    industry: 'finance',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 9,
+    layout: 'listicle',
+    thumbnail: 'i-lucide-landmark',
+    accent: '#34d399',
+    mediaLabel: 'Advisor / Office Footage',
+    mediaTrackName: 'Finance Footage',
+    tags: ['vay vốn', 'tài chính', 'ngân hàng', 'bảo hiểm', 'finance', 'loan'],
+    copy: {
+      eyebrow: 'VAY TIÊU DÙNG 2026',
+      items: ['HỒ SƠ ĐƠN GIẢN', 'DUYỆT NHANH TRONG NGÀY', 'LÃI SUẤT LINH HOẠT'],
+      cta: 'TÌM HIỂU ĐIỀU KIỆN VAY'
+    }
+  },
+  {
+    id: 'tpl-automotive-car-listing',
+    name: 'Car Listing Reel',
+    description: 'Widescreen used-car listing: model line, condition specs, contact CTA.',
+    industry: 'automotive',
+    category: 'promo',
+    aspectRatio: '16:9',
+    seconds: 8,
+    layout: 'banner',
+    thumbnail: 'i-lucide-car',
+    accent: '#f97316',
+    mediaLabel: 'Car Exterior / Interior',
+    mediaTrackName: 'Car Footage',
+    tags: ['ô tô', 'xe cũ', 'bán xe', 'car', 'auto', 'listing'],
+    copy: {
+      title: 'VF8 2024 · LƯỚT 12.000KM',
+      subtitle: 'XE CHÍNH CHỦ · BẢO HÀNH HÃNG',
+      cta: 'LIÊN HỆ XEM XE'
+    }
+  },
+  {
+    id: 'tpl-medical-clinic-intro',
+    name: 'Clinic Introduction',
+    description: 'Clinic opener with opening hours and an online booking CTA.',
+    industry: 'medical',
+    category: 'intro',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'hook',
+    thumbnail: 'i-lucide-stethoscope',
+    accent: '#7dd3fc',
+    mediaLabel: 'Clinic / Team Footage',
+    mediaTrackName: 'Clinic Footage',
+    tags: ['phòng khám', 'nha khoa', 'sức khỏe', 'đặt lịch', 'clinic', 'medical'],
+    copy: {
+      title: 'PHÒNG KHÁM MỞ CỬA 7H - 21H',
+      subtitle: 'ĐẶT LỊCH ONLINE · KHÔNG PHẢI CHỜ',
+      cta: 'ĐẶT LỊCH KHÁM NGAY'
+    }
+  },
+  {
+    id: 'tpl-services-local-offer',
+    name: 'Local Service Offer',
+    description: 'Service price card with response-time promise and booking CTA.',
+    industry: 'services',
+    category: 'promo',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'price',
+    thumbnail: 'i-lucide-wrench',
+    accent: '#f97316',
+    mediaLabel: 'Service / Job Footage',
+    mediaTrackName: 'Service Footage',
+    tags: ['dịch vụ', 'sửa chữa', 'điện lạnh', 'vệ sinh', 'local service', 'repair'],
+    copy: {
+      title: 'VỆ SINH MÁY LẠNH 99K',
+      subtitle: 'GỌI LÀ CÓ MẶT TRONG 2 GIỜ',
+      cta: 'ĐẶT LỊCH NGAY'
+    }
+  },
+  {
+    id: 'tpl-events-wedding-invite',
+    name: 'Wedding Invitation',
+    description: 'Elegant vertical invitation with couple names, date and RSVP CTA.',
+    industry: 'events',
+    category: 'intro',
+    aspectRatio: '9:16',
+    seconds: 8,
+    layout: 'stack',
+    thumbnail: 'i-lucide-heart-handshake',
+    accent: '#f9a8d4',
+    mediaLabel: 'Couple / Venue Footage',
+    mediaTrackName: 'Wedding Footage',
+    tags: ['đám cưới', 'thiệp mời', 'sự kiện', 'wedding', 'event', 'invitation'],
+    copy: {
+      eyebrow: 'SAVE THE DATE',
+      title: 'MINH & LAN · 20.12.2026',
+      cta: 'XEM THIỆP MỜI'
+    }
+  },
+  {
+    id: 'tpl-ecommerce-unboxing-hook',
+    name: 'Unboxing Hook',
+    description: 'Unboxing opener that lands the question and price before the reveal.',
+    industry: 'ecommerce',
+    category: 'minimal',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'hook',
+    thumbnail: 'i-lucide-package-open',
+    accent: '#facc15',
+    mediaLabel: 'Unboxing Footage',
+    mediaTrackName: 'Unboxing',
+    tags: ['unboxing', 'bóc hộp', 'review', 'shopee', 'ecommerce', 'haul'],
+    copy: {
+      title: 'MỞ HỘP ĐƠN 199K NÀY',
+      subtitle: 'CÓ ĐÁNG TIỀN KHÔNG?',
+      cta: 'MUA TẠI GIỎ HÀNG'
+    }
+  },
+  {
+    id: 'tpl-pets-ugc-review',
+    name: 'Pet UGC Review',
+    description: 'UGC-style pet review with a name card and product detail line.',
+    industry: 'pets',
+    category: 'minimal',
+    aspectRatio: '9:16',
+    seconds: 6,
+    layout: 'lower-third',
+    thumbnail: 'i-lucide-paw-print',
+    accent: '#fda4af',
+    mediaLabel: 'Pet Footage',
+    mediaTrackName: 'Pet B-Roll',
+    tags: ['thú cưng', 'mèo', 'chó', 'pate', 'pet', 'ugc'],
+    copy: {
+      title: 'BÔNG · 2 TUỔI',
+      subtitle: 'REVIEW PATE CHO MÈO KÉN ĂN'
+    }
+  },
+  {
+    id: 'tpl-creator-channel-outro',
+    name: 'Channel Outro Card',
+    description: 'Widescreen outro card: thank-you line, subscribe prompt, bell CTA.',
+    industry: 'creator',
+    category: 'outro',
+    aspectRatio: '16:9',
+    seconds: 5,
+    layout: 'banner',
+    thumbnail: 'i-lucide-bell',
+    accent: '#ef4444',
+    mediaLabel: 'Background Footage',
+    mediaTrackName: 'Outro Background',
+    tags: ['outro', 'kết video', 'youtube', 'subscribe', 'creator'],
+    copy: {
+      title: 'CẢM ƠN ĐÃ XEM',
+      subtitle: 'ĐĂNG KÝ KÊNH ĐỂ KHÔNG BỎ LỠ VIDEO MỚI',
+      cta: 'BẤM CHUÔNG NGAY'
+    }
+  }
+]
+
 /**
  * Standard built-in templates ready to use.
  */
@@ -50,6 +1012,7 @@ export const BUILTIN_TEMPLATES = [
     id: 'tpl-tiktok-hook-intro',
     name: 'TikTok / Reels Hook Intro',
     description: 'Fast-paced viral vertical opener with high-impact headline text and media placeholder.',
+    industry: 'creator',
     category: 'intro',
     aspectRatio: '9:16',
     canvas: { width: 1080, height: 1920, fps: 30 },
@@ -170,6 +1133,7 @@ export const BUILTIN_TEMPLATES = [
     id: 'tpl-youtube-cinematic-intro',
     name: 'YouTube Cinematic Title',
     description: 'Clean cinematic widescreen intro with smooth fade, elegant typography and ambient atmosphere.',
+    industry: 'general',
     category: 'intro',
     aspectRatio: '16:9',
     canvas: { width: 1920, height: 1080, fps: 30 },
@@ -294,6 +1258,7 @@ export const BUILTIN_TEMPLATES = [
     id: 'tpl-split-screen-duo',
     name: 'Dual Split-Screen (Top & Bottom)',
     description: 'Two synchronized vertical boxes for reaction videos, comparisons, and dual camera angles.',
+    industry: 'creator',
     category: 'split-screen',
     aspectRatio: '9:16',
     canvas: { width: 1080, height: 1920, fps: 30 },
@@ -416,6 +1381,7 @@ export const BUILTIN_TEMPLATES = [
     id: 'tpl-modern-promo-card',
     name: 'Instagram Square Product Promo',
     description: 'Clean 1:1 square promo card with price tag, headline, and centered product media.',
+    industry: 'ecommerce',
     category: 'promo',
     aspectRatio: '1:1',
     canvas: { width: 1080, height: 1080, fps: 30 },
@@ -538,6 +1504,7 @@ export const BUILTIN_TEMPLATES = [
     id: 'tpl-outro-social-end',
     name: 'YouTube Outro & Subscribe Card',
     description: 'Widescreen outro screen prompting viewers to like, subscribe and check next video.',
+    industry: 'creator',
     category: 'outro',
     aspectRatio: '16:9',
     canvas: { width: 1920, height: 1080, fps: 30 },
@@ -662,6 +1629,7 @@ export const BUILTIN_TEMPLATES = [
     id: 'tpl-minimal-vlog-lowerthird',
     name: 'Minimal Vlog & Lower Third',
     description: 'Clean modern documentary overlay with lower-third speaker credit and location tag.',
+    industry: 'general',
     category: 'minimal',
     aspectRatio: '16:9',
     canvas: { width: 1920, height: 1080, fps: 30 },
@@ -749,7 +1717,8 @@ export const BUILTIN_TEMPLATES = [
         ]
       }
     ]
-  }
+  },
+  ...INDUSTRY_TEMPLATE_SPECS.map(buildIndustryTemplate)
 ]
 
 /**
@@ -874,15 +1843,20 @@ export function checkRequiredAssets(template, view = {}) {
 }
 
 /**
- * Filters templates by category, aspect ratio, and search query.
+ * Filters templates by category, industry, aspect ratio, and search query.
+ * Search covers name, description, tags and the industry label — the library
+ * ships Vietnamese keywords in `tags` so "quán ăn" finds the F&B cards.
  */
 export function filterTemplates(templates, options = {}) {
   const list = Array.isArray(templates) ? templates : BUILTIN_TEMPLATES
-  const { category, aspectRatio, search } = options
+  const { category, aspectRatio, search, industry } = options
 
   return list.filter((tpl) => {
     if (!tpl) return false
     if (category && category !== 'all' && tpl.category !== category) {
+      return false
+    }
+    if (industry && industry !== 'all' && tpl.industry !== industry) {
       return false
     }
     if (aspectRatio && aspectRatio !== 'all' && tpl.aspectRatio !== aspectRatio) {
@@ -890,9 +1864,16 @@ export function filterTemplates(templates, options = {}) {
     }
     if (search && typeof search === 'string' && search.trim()) {
       const q = search.trim().toLowerCase()
-      const matchName = (tpl.name || '').toLowerCase().includes(q)
-      const matchDesc = (tpl.description || '').toLowerCase().includes(q)
-      if (!matchName && !matchDesc) return false
+      const industryMeta = INDUSTRY_CATALOG.find(i => i.id === tpl.industry)
+      const haystack = [
+        tpl.name,
+        tpl.description,
+        tpl.industry,
+        industryMeta ? industryMeta.label : '',
+        ...(Array.isArray(tpl.tags) ? tpl.tags : [])
+      ]
+      const matched = haystack.some(value => String(value || '').toLowerCase().includes(q))
+      if (!matched) return false
     }
     return true
   })

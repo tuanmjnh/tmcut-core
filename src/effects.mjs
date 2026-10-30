@@ -24,6 +24,7 @@ export const EFFECT_REGISTRY = {
     label: 'Blur',
     category: 'blur',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -33,6 +34,7 @@ export const EFFECT_REGISTRY = {
     label: 'Sharpen',
     category: 'sharpen',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -42,6 +44,7 @@ export const EFFECT_REGISTRY = {
     label: 'Vignette',
     category: 'light',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'intensity', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -51,6 +54,7 @@ export const EFFECT_REGISTRY = {
     label: 'Grain',
     category: 'texture',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 30 },
       { name: 'size', kind: 'enum', options: ['fine', 'medium', 'coarse'], default: 'fine' }
@@ -61,6 +65,7 @@ export const EFFECT_REGISTRY = {
     label: 'Chroma Key',
     category: 'keying',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       { name: 'color', kind: 'color', default: '#00ff00' },
       { name: 'similarity', kind: 'number', min: 0, max: 100, default: 30 },
@@ -73,6 +78,7 @@ export const EFFECT_REGISTRY = {
     label: 'LUT 3D',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       // Preset grades (R128 A3): 20 linear FFmpeg mappings, all render
       // verified. The first five keep their R4 order/output byte-identical
@@ -97,6 +103,7 @@ export const EFFECT_REGISTRY = {
     label: 'Stabilize',
     category: 'motion',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       { name: 'strength', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -106,6 +113,7 @@ export const EFFECT_REGISTRY = {
     label: 'EQ / Grade',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'brightness', kind: 'number', min: -100, max: 100, default: 0 },
       { name: 'contrast', kind: 'number', min: 0, max: 200, default: 100 },
@@ -129,6 +137,7 @@ export const EFFECT_REGISTRY = {
     label: 'Pixelate',
     category: 'stylize',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       // Block size in pixels. Mapped to FFmpeg `pixelize` rather than a
       // scale-down/scale-up pair: scaling cannot restore the exact frame
@@ -143,6 +152,7 @@ export const EFFECT_REGISTRY = {
     label: 'Emboss',
     category: 'stylize',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       // Scales the convolution divisor (100 = the classic 3x3 kernel).
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 100 }
@@ -153,6 +163,7 @@ export const EFFECT_REGISTRY = {
     label: 'Edge Detect',
     category: 'stylize',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       // low/high only apply to the canny mode; the other modes ignore them.
       { name: 'mode', kind: 'enum', options: ['wires', 'colormix', 'canny'], default: 'wires' },
@@ -165,6 +176,7 @@ export const EFFECT_REGISTRY = {
     label: 'Letterbox',
     category: 'stylize',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'exact' },
     params: [
       // Bar height as a percentage of the frame height.
       { name: 'size', kind: 'number', min: 1, max: 40, default: 12 }
@@ -176,6 +188,7 @@ export const EFFECT_REGISTRY = {
     label: 'Negate',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'exact' },
     params: [
       { name: 'alpha', kind: 'bool', default: false }
     ]
@@ -185,6 +198,7 @@ export const EFFECT_REGISTRY = {
     label: 'Vivid',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -194,6 +208,7 @@ export const EFFECT_REGISTRY = {
     label: 'Bleach Bypass',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 100 }
     ]
@@ -203,6 +218,7 @@ export const EFFECT_REGISTRY = {
     label: 'Teal & Orange',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 60 }
     ]
@@ -212,6 +228,7 @@ export const EFFECT_REGISTRY = {
     label: 'Vibrance',
     category: 'color',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'intensity', kind: 'number', min: -100, max: 100, default: 50 }
     ]
@@ -222,6 +239,7 @@ export const EFFECT_REGISTRY = {
     label: 'Mirror Horizontal',
     category: 'distort',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'exact' },
     params: [
       { name: 'axis', kind: 'enum', options: ['horizontal', 'vertical', 'both'], default: 'horizontal' }
     ]
@@ -231,6 +249,7 @@ export const EFFECT_REGISTRY = {
     label: 'Mirror Vertical',
     category: 'distort',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'exact' },
     params: [
       { name: 'axis', kind: 'enum', options: ['horizontal', 'vertical', 'both'], default: 'vertical' }
     ]
@@ -240,6 +259,7 @@ export const EFFECT_REGISTRY = {
     label: 'Rotate 90',
     category: 'distort',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       // 1..3 clockwise quarter turns. NOTE: this is the only new effect that
       // swaps the frame width/height (transpose), so the caller has to
@@ -252,6 +272,7 @@ export const EFFECT_REGISTRY = {
     label: 'Chromatic Aberration',
     category: 'distort',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'shift', kind: 'number', min: 1, max: 64, default: 6 }
     ]
@@ -261,6 +282,7 @@ export const EFFECT_REGISTRY = {
     label: 'Fisheye',
     category: 'distort',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       { name: 'strength', kind: 'number', min: 0, max: 100, default: 30 }
     ]
@@ -271,6 +293,7 @@ export const EFFECT_REGISTRY = {
     label: 'Motion Blur',
     category: 'motion',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       { name: 'frames', kind: 'number', min: 2, max: 30, default: 8 }
     ]
@@ -280,6 +303,7 @@ export const EFFECT_REGISTRY = {
     label: 'Afterimage',
     category: 'motion',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'illustrative' },
     params: [
       { name: 'decay', kind: 'number', min: 0, max: 100, default: 80 }
     ]
@@ -290,6 +314,7 @@ export const EFFECT_REGISTRY = {
     label: 'Denoise',
     category: 'texture',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'strength', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -299,6 +324,7 @@ export const EFFECT_REGISTRY = {
     label: 'Deband',
     category: 'texture',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       // Threshold in 1/1000 units (20 = the FFmpeg default 0.02).
       { name: 'threshold', kind: 'number', min: 1, max: 100, default: 20 },
@@ -311,6 +337,7 @@ export const EFFECT_REGISTRY = {
     label: 'Sepia',
     category: 'retro',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'exact' },
     params: [
       { name: 'intensity', kind: 'number', min: 0, max: 100, default: 100 }
     ]
@@ -320,6 +347,7 @@ export const EFFECT_REGISTRY = {
     label: 'Monochrome',
     category: 'retro',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'intensity', kind: 'number', min: 0, max: 100, default: 100 }
     ]
@@ -329,6 +357,7 @@ export const EFFECT_REGISTRY = {
     label: 'VHS',
     category: 'retro',
     renderReady: true,
+    preview: { strategy: 'css', fidelity: 'approximate' },
     params: [
       { name: 'amount', kind: 'number', min: 0, max: 100, default: 50 }
     ]
@@ -738,4 +767,60 @@ export function buildFfmpegEffectFilters(effects) {
     }
   }
   return filters
+}
+
+/**
+ * The export chain one `lut3d` preset maps to, straight from the table above.
+ * Exposed so the UI derives its grade preview from the same data the renderer
+ * uses instead of keeping a second, drift-prone colour table (Roadmap v1 §5.1).
+ * Returns null when the preset has no chain — an unknown id OR 'neutral', the
+ * documented no-op; both render as identity.
+ *
+ * @param {string} preset
+ * @returns {string | null}
+ */
+export function lut3dChain(preset) {
+  return Object.prototype.hasOwnProperty.call(LUT3D_CHAINS, preset) ? LUT3D_CHAINS[preset] : null
+}
+
+/**
+ * Preview/export capability matrix for one registry effect (Roadmap v1 §5.6).
+ *
+ * The UI reads fidelity from HERE instead of from a presentation table, so a
+ * thumbnail can never claim more than the definition actually delivers.
+ * Returns null for an unknown type — callers must show an honest unknown
+ * state rather than a generic animation.
+ *
+ * @param {string} type
+ * @returns {{ fidelity: 'exact'|'approximate'|'illustrative', strategy: string, exportSupported: boolean, label: string, category: string } | null}
+ */
+export function fxCapabilities(type) {
+  const desc = EFFECT_REGISTRY[type]
+  if (!desc) return null
+  return {
+    fidelity: desc.preview?.fidelity ?? 'approximate',
+    strategy: desc.preview?.strategy ?? 'css',
+    exportSupported: desc.renderReady === true,
+    label: desc.label,
+    category: desc.category
+  }
+}
+
+/**
+ * Clamp/repair a single raw param value against the registry descriptor.
+ * Same coercion `normalizeEffects` uses, exposed so inspector controls and
+ * thumbnails enforce the documented bounds instead of inventing their own.
+ * Returns undefined when the type or param name is not registered.
+ *
+ * @param {string} type
+ * @param {string} name
+ * @param {unknown} raw
+ * @returns {unknown}
+ */
+export function clampEffectParam(type, name, raw) {
+  const desc = EFFECT_REGISTRY[type]
+  if (!desc) return undefined
+  const param = desc.params.find(candidate => candidate.name === name)
+  if (!param) return undefined
+  return coerceValue(param, raw)
 }

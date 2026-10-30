@@ -17,6 +17,11 @@
       "import": "./dist/generationAdapter.js",
       "require": "./dist/generationAdapter.cjs"
     },
+    "./providerAdapter": {
+      "types": "./dist/providerAdapter.d.ts",
+      "import": "./dist/providerAdapter.js",
+      "require": "./dist/providerAdapter.cjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [

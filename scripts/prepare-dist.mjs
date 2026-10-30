@@ -82,6 +82,11 @@ const distPkg = {
       import: './generationAdapter.js',
       require: './generationAdapter.cjs'
     },
+    './providerAdapter': {
+      types: './providerAdapter.d.ts',
+      import: './providerAdapter.js',
+      require: './providerAdapter.cjs'
+    },
     './package.json': './package.json'
   },
   files: ['*'],

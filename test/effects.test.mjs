@@ -1,7 +1,7 @@
 // @tmcut/core — effects registry tests (Roadmap C6). Run: node --test "test/*.test.mjs"
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { EFFECT_REGISTRY, validateEffect, normalizeEffects, buildFfmpegEffectFilters } from '../src/effects.mjs'
+import { EFFECT_REGISTRY, validateEffect, normalizeEffects, buildFfmpegEffectFilters, fxCapabilities, clampEffectParam, lut3dChain } from '../src/effects.mjs'
 
 const FIRST_WAVE = [
   'blur', 'sharpen', 'vignette', 'grain', 'chromakey', 'lut3d', 'stabilize', 'eq-grade'
@@ -219,5 +219,79 @@ describe('effects (C6)', () => {
       assert.ok(filters[0].startsWith('deshake=rx='))
       assert.equal(filters[1], 'eq=brightness=0.05:contrast=1.2:saturation=1.1')
     })
+  })
+})
+
+// Roadmap §5.6 / §6.5 — the registry is the only source the preview surface may
+// read from: fidelity, export support and bounds all come from here, so a tile
+// can never claim more than the renderer delivers.
+describe('fx capabilities contract (roadmap §5-6)', () => {
+  const FIDELITY = ['exact', 'approximate', 'illustrative']
+
+  it('every descriptor declares a preview strategy and honest fidelity', () => {
+    for (const [key, desc] of Object.entries(EFFECT_REGISTRY)) {
+      assert.ok(desc.preview, `${key} has no preview descriptor`)
+      assert.equal(desc.preview.strategy, 'css', `${key} preview strategy`)
+      assert.ok(FIDELITY.includes(desc.preview.fidelity), `${key} fidelity ${desc.preview.fidelity}`)
+    }
+  })
+
+  it('fxCapabilities mirrors the descriptor and rejects unknown types', () => {
+    assert.equal(fxCapabilities('no-such-effect'), null)
+    for (const [key, desc] of Object.entries(EFFECT_REGISTRY)) {
+      const caps = fxCapabilities(key)
+      assert.equal(caps.fidelity, desc.preview.fidelity)
+      assert.equal(caps.exportSupported, desc.renderReady === true)
+      assert.equal(caps.label, desc.label)
+      assert.equal(caps.category, desc.category)
+    }
+  })
+
+  it('fidelity is a documented stance, not a default', () => {
+    // Only where CSS runs the identical maths may a tile claim exact: negate /
+    // mirror / letterbox / sepia. Blur sigma, colorbalance and the temporal
+    // families are approximations and must say so (roadmap §5.6).
+    assert.equal(fxCapabilities('negate').fidelity, 'exact')
+    assert.equal(fxCapabilities('letterbox').fidelity, 'exact')
+    assert.equal(fxCapabilities('blur').fidelity, 'approximate')
+    assert.equal(fxCapabilities('eq-grade').fidelity, 'approximate')
+    assert.equal(fxCapabilities('chromakey').fidelity, 'illustrative')
+    assert.equal(fxCapabilities('stabilize').fidelity, 'illustrative')
+    const illustrative = Object.keys(EFFECT_REGISTRY).filter(k => fxCapabilities(k).fidelity === 'illustrative')
+    assert.ok(illustrative.length > 0, 'nothing admitted to being an approximation')
+  })
+
+  it('clampEffectParam enforces the documented bounds', () => {
+    assert.equal(clampEffectParam('blur', 'amount', 9999), 100)
+    assert.equal(clampEffectParam('blur', 'amount', -400), 0)
+    assert.equal(clampEffectParam('blur', 'amount', 'lots'), 50)
+    // an out-of-enum choice repairs to the documented default, never to a
+    // random preset — and the repaired value always passes validation.
+    const lutParam = EFFECT_REGISTRY.lut3d.params.find(p => p.name === 'lut')
+    assert.equal(clampEffectParam('lut3d', 'lut', 'not-a-preset'), lutParam.default)
+    assert.equal(clampEffectParam('blur', 'nope', 1), undefined)
+    assert.equal(clampEffectParam('no-such-effect', 'amount', 1), undefined)
+    assert.deepEqual(validateEffect({ type: 'blur', params: { amount: clampEffectParam('blur', 'amount', 500) } }), [])
+  })
+
+  it('lut3dChain covers every registered preset except the no-op', () => {
+    const presets = EFFECT_REGISTRY.lut3d.params.find(p => p.name === 'lut').options
+    const bare = /^[a-z0-9]+=/
+    for (const preset of presets) {
+      const chain = lut3dChain(preset)
+      if (preset === 'neutral') {
+        assert.equal(chain, null, 'neutral must stay the documented no-op')
+        continue
+      }
+      assert.ok(typeof chain === 'string' && chain.length > 0, `${preset} has no chain`)
+      // The UI painter splits these on commas, so no quoting/escaping surprises.
+      for (const token of chain.split(',')) {
+        assert.ok(bare.test(token.trim()), `${preset}: bad token "${token}"`)
+      }
+      assert.doesNotMatch(chain, /[;'"`$\\]/, `${preset} chain carries shell-risk characters`)
+      // every non-neutral preset must actually render something
+      assert.ok(buildFfmpegEffectFilters([{ type: 'lut3d', params: { lut: preset } }]).length > 0, preset)
+    }
+    assert.equal(lut3dChain('nope'), null)
   })
 })
